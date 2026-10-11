@@ -1,4 +1,4 @@
-import { evaluateHeldOutFile } from "./held-out.js";
+import { evaluateHeldOutFile } from "../evaluation/held-out.js";
 
 const args = process.argv.slice(2);
 const options = new Map<string, string>();
