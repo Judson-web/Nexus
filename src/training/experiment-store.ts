@@ -6,6 +6,23 @@ export interface TrainingRunRecord {
   readonly seed: number;
 }
 
+export interface EvaluationRecord {
+  readonly modelFamily: string;
+  readonly datasetId?: string;
+  readonly metrics: Record<string, unknown>;
+  readonly notes?: string;
+}
+
+export interface ModelVersionRecord {
+  readonly trainingRunId?: string;
+  readonly modelFamily: string;
+  readonly version: string;
+  readonly checkpointUri: string;
+  readonly checkpointSha256: string;
+  readonly config: Record<string, unknown>;
+  readonly parameterCount: number;
+}
+
 let pool: Pool | undefined;
 
 function getPool(): Pool | undefined {
@@ -61,11 +78,23 @@ export async function failTrainingRun(id: string | undefined, error: unknown): P
   );
 }
 
-export interface EvaluationRecord {
-  readonly modelFamily: string;
-  readonly datasetId?: string;
-  readonly metrics: Record<string, unknown>;
-  readonly notes?: string;
+export async function registerModelVersion(record: ModelVersionRecord): Promise<string | undefined> {
+  const clientPool = getPool();
+  if (!clientPool) return undefined;
+  const result = await clientPool.query<{ id: string }>(
+    `INSERT INTO public.model_versions
+      (training_run_id, model_family, version, checkpoint_uri, checkpoint_sha256, config, parameter_count, status)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, 'candidate')
+     ON CONFLICT (model_family, version) DO UPDATE
+       SET checkpoint_uri = EXCLUDED.checkpoint_uri,
+           checkpoint_sha256 = EXCLUDED.checkpoint_sha256,
+           config = EXCLUDED.config,
+           parameter_count = EXCLUDED.parameter_count
+     RETURNING id`,
+    [record.trainingRunId ?? null, record.modelFamily, record.version, record.checkpointUri,
+      record.checkpointSha256, JSON.stringify(record.config), record.parameterCount],
+  );
+  return result.rows[0]?.id;
 }
 
 export async function recordEvaluation(records: readonly EvaluationRecord[]): Promise<void> {
@@ -76,15 +105,18 @@ export async function recordEvaluation(records: readonly EvaluationRecord[]): Pr
   try {
     await client.query("BEGIN");
     for (const record of records) {
-      await client.query(
+      const inserted = await client.query(
         `INSERT INTO public.evaluation_runs (model_version_id, dataset_id, metrics, passed, notes)
          SELECT mv.id, $2::uuid, $3::jsonb, false, $4
          FROM public.model_versions mv
          WHERE mv.model_family = $1
-         ORDER BY mv.created_at DESC
-         LIMIT 1`,
-        [record.modelFamily, record.datasetId ?? null, JSON.stringify(record.metrics), record.notes ?? "Held-out diagnostic evaluation; not a production approval."],
+         ORDER BY mv.created_at DESC LIMIT 1`,
+        [record.modelFamily, record.datasetId ?? null, JSON.stringify(record.metrics),
+          record.notes ?? "Held-out diagnostic evaluation; not a production approval."],
       );
+      if (inserted.rowCount === 0) {
+        throw new Error(`No registered model version found for ${record.modelFamily}; register the checkpoint before recording evaluation.`);
+      }
     }
     await client.query("COMMIT");
   } catch (error) {
