@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { BigramModel } from "../../../src/model/bigram-model";
-import { ByteTokenizer } from "../../../src/tokenizer/byte-tokenizer";
+import { BigramModel } from "../../../src/model/bigram-model.js";
+import { ByteTokenizer } from "../../../src/tokenizer/byte-tokenizer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 10;
