@@ -41,6 +41,10 @@ The bigram baseline predicts one byte from the previous byte. The context MLP co
 
 Apply SQL files in `database/migrations` to the Neon PostgreSQL project in order. Migration `0002_experiment_metrics.sql` adds dataset split manifests and initial/validation/test metrics to experiment metadata. These migrations are versioned but have not been applied to the live database. Set `DATABASE_URL` to enable optional training-run metadata persistence; without it, training runs locally without database access. Do not apply migrations to the live database until the schema change is explicitly approved; test migrations against a disposable Neon branch first. The current trainer records running/succeeded status and final loss using the existing `training_runs` table. Checkpoints and large training artifacts should live in versioned file/object storage; PostgreSQL stores metadata and checksums rather than multi-megabyte weight arrays as ordinary rows.
 
+## First production release
+
+See [`docs/production-readiness.md`](docs/production-readiness.md) for the release gates and current blockers. The checked-in seed corpus is a smoke-test fixture, not a production training corpus; production promotion requires a fixed held-out benchmark and a pinned, checksum-verified model artifact. The live endpoint remains unchanged until those gates pass.
+
 ## Workflow
 
 Develop on feature branches. TypeScript checks, tests, and production builds run in GitHub Actions. Vercel's Git build-ignore setting prevents automatic deployments from routine commits; production deployment is a separate, explicit action after verification.
