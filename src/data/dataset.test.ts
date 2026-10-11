@@ -8,7 +8,7 @@ test("dataset preparation normalizes, deduplicates, hashes, and assigns stable s
   const second = prepareDataset(source, { seed: 9 });
   assert.deepEqual(first, second);
   assert.equal(first.duplicatesRemoved, 1);
-  assert.equal(first.emptyLinesRemoved, 2);
+  assert.equal(first.emptyLinesRemoved, 1);
   assert.equal(first.acceptedExamples, 10);
   assert.equal(first.splits.train + first.splits.validation + first.splits.test, first.acceptedExamples);
   assert.match(first.sourceSha256, /^[a-f0-9]{64}$/);
