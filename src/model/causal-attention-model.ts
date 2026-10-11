@@ -89,7 +89,7 @@ export class CausalAttentionModel {
 
     const pooled = new Float64Array(embeddingSize);
     for (let i = 0; i <= last; i++) {
-      for (let d = 0; d < embeddingSize; d++) pooled[d] += scores[i]! * vectors[i]![d]!;
+      for (let d = 0; d < embeddingSize; d++) pooled[d] = pooled[d]! + scores[i]! * vectors[i]![d]!;
     }
     const logits = new Float64Array(vocabSize);
     for (let token = 0; token < vocabSize; token++) {
@@ -99,7 +99,7 @@ export class CausalAttentionModel {
     }
     const logitMax = Math.max(...logits);
     let normalizer = 0;
-    for (let i = 0; i < vocabSize; i++) normalizer += Math.exp(logits[i]! - logitMax);
+    for (let i = 0; i < vocabSize; i++) normalizer = normalizer + Math.exp(logits[i]! - logitMax);
     const logZ = logitMax + Math.log(normalizer);
     const probabilities = Float64Array.from(logits, (v) => Math.exp(v - logZ));
     return { ids, vectors, scores, pooled, logits, probabilities, logZ };
@@ -129,16 +129,16 @@ export class CausalAttentionModel {
         examples++;
 
         const gradLogits = Float64Array.from(pass.probabilities);
-        gradLogits[target] -= 1;
+        gradLogits[target] = gradLogits[target]! - 1;
         const gradPooled = new Float64Array(embeddingSize);
         for (let d = 0; d < embeddingSize; d++) {
           for (let token = 0; token < vocabSize; token++) {
             const index = d * vocabSize + token;
-            gradPooled[d] += this.output[index]! * gradLogits[token]!;
-            this.output[index] -= learningRate * pass.pooled[d]! * gradLogits[token]!;
+            gradPooled[d] = gradPooled[d]! + this.output[index]! * gradLogits[token]!;
+            this.output[index] = this.output[index]! - learningRate * pass.pooled[d]! * gradLogits[token]!;
           }
         }
-        for (let token = 0; token < vocabSize; token++) this.outputBias[token] -= learningRate * gradLogits[token]!;
+        for (let token = 0; token < vocabSize; token++) this.outputBias[token] = this.outputBias[token]! - learningRate * gradLogits[token]!;
         // Backpropagate through the weighted sum and the learned attention
         // distribution, including its relative-position logits.
         const gradAttention = new Float64Array(contextSize);
@@ -156,10 +156,11 @@ export class CausalAttentionModel {
         for (let i = 0; i < contextSize; i++) {
           const relative = contextSize - 1 - i;
           const gradScore = pass.scores[i]! * (gradAttention[i]! - weightedGrad);
-          this.positionBias[relative] -= learningRate * gradScore;
+          this.positionBias[relative] = this.positionBias[relative]! - learningRate * gradScore;
           const tokenId = pass.ids[i]!;
           for (let d = 0; d < embeddingSize; d++) {
-            this.embedding[tokenId * embeddingSize + d] -= learningRate * gradVectors[i]![d]!;
+            const index = tokenId * embeddingSize + d;
+            this.embedding[index] = this.embedding[index]! - learningRate * gradVectors[i]![d]!;
           }
         }
       }
