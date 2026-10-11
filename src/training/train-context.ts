@@ -34,7 +34,6 @@ export async function trainContextFromFile(options: ContextTrainOptions) {
     await writeFile(temporary, bytes, { flag: "w" });
     await rename(temporary, options.outputPath);
     await writeFile(options.outputPath + ".sha256", sha256 + "  " + bytes.length + "\n", { flag: "w" });
-    await finishTrainingRun(runId, { finalLoss: metrics.loss, initialLoss });
     await registerModelVersion({
       ...(runId ? { trainingRunId: runId } : {}),
       modelFamily: "nexus-context-mlp",
@@ -44,6 +43,7 @@ export async function trainContextFromFile(options: ContextTrainOptions) {
       config: { ...model.config, epochs: options.epochs, learningRate: options.learningRate },
       parameterCount: checkpoint.embedding.length + checkpoint.w1.length + checkpoint.b1.length + checkpoint.w2.length + checkpoint.b2.length,
     });
+    await finishTrainingRun(runId, { finalLoss: metrics.loss, initialLoss });
     return { ...metrics, initialLoss, finalLoss: metrics.loss, checkpointPath: options.outputPath, checksum: sha256, checkpointBytes: bytes.length, modelFamily: "nexus-context-mlp", parameterCount: checkpoint.embedding.length + checkpoint.w1.length + checkpoint.b1.length + checkpoint.w2.length + checkpoint.b2.length };
   } catch (error) {
     await failTrainingRun(runId, error);
