@@ -45,3 +45,23 @@ test("manifest evaluator rejects split count tampering", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("manifest evaluator rejects example text and prepared hash tampering", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nexus-manifest-eval-"));
+  const path = join(directory, "manifest.json");
+  try {
+    const manifest = prepareDataset(Array.from({ length: 120 }, (_, i) => `Unique integrity line ${i} for dataset validation.`).join("\n"), { seed: 3 });
+    const changedText = {
+      ...manifest,
+      examples: manifest.examples.map((example, index) => index === 0 ? { ...example, text: example.text + " altered" } : example),
+    };
+    await writeFile(path, JSON.stringify(changedText), "utf8");
+    await assert.rejects(evaluateDatasetManifest({ manifestPath: path, epochs: 1 }), /text hash does not match/i);
+
+    const changedPreparedHash = { ...manifest, preparedSha256: "0".repeat(64) };
+    await writeFile(path, JSON.stringify(changedPreparedHash), "utf8");
+    await assert.rejects(evaluateDatasetManifest({ manifestPath: path, epochs: 1 }), /prepared-content hash does not match/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
