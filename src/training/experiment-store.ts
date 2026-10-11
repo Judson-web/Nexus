@@ -116,7 +116,7 @@ export async function recordEvaluation(records: readonly EvaluationRecord[]): Pr
           record.notes ?? "Held-out diagnostic evaluation; not a production approval."],
       );
       if (inserted.rowCount === 0) {
-        throw new Error(`No registered model version found for ${record.modelFamily}; register the checkpoint before recording evaluation.`);
+        throw new Error(`No registered model version ${record.modelFamily}@${record.modelVersion} found; register that exact checkpoint before recording evaluation.`);
       }
     }
     await client.query("COMMIT");
