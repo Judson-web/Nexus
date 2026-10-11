@@ -126,7 +126,7 @@ export class ContextModel {
           for (let v = 0; v < c.vocabSize; v += 1) {
             const index = h * c.vocabSize + v;
             gradW2[index] = hidden[h]! * dLogits[v]!;
-            dHidden[h] += this.w2[index]! * dLogits[v]!;
+            dHidden[h] = dHidden[h]! + this.w2[index]! * dLogits[v]!;
           }
         }
         for (let h = 0; h < c.hiddenSize; h += 1) dPreHidden[h] = dHidden[h]! * (1 - hidden[h]! * hidden[h]!);
@@ -141,7 +141,7 @@ export class ContextModel {
           for (let k = 0; k < c.embeddingSize; k += 1) {
             let gradient = 0;
             for (let h = 0; h < c.hiddenSize; h += 1) gradient += this.w1[(inputOffset + k) * c.hiddenSize + h]! * dPreHidden[h]!;
-            gradEmbedding[tokenOffset + k] += gradient;
+            gradEmbedding[tokenOffset + k] = gradEmbedding[tokenOffset + k]! + gradient;
           }
         }
         for (let i = 0; i < this.w2.length; i += 1) this.w2[i] = this.w2[i]! - learningRate * gradW2[i]!;
@@ -167,7 +167,7 @@ export class ContextModel {
       const tokenOffset = padded[j]! * c.embeddingSize;
       for (let k = 0; k < c.embeddingSize; k += 1) {
         const value = this.embedding[tokenOffset + k]!;
-        for (let h = 0; h < c.hiddenSize; h += 1) hidden[h] += value * this.w1[(j * c.embeddingSize + k) * c.hiddenSize + h]!;
+        for (let h = 0; h < c.hiddenSize; h += 1) hidden[h] = hidden[h]! + value * this.w1[(j * c.embeddingSize + k) * c.hiddenSize + h]!;
       }
     }
     for (let h = 0; h < c.hiddenSize; h += 1) hidden[h] = Math.tanh(hidden[h]! + this.b1[h]!);
