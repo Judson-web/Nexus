@@ -27,17 +27,18 @@ npm run train -- --input data/corpus.txt --epochs 30 --learning-rate 0.08 --outp
 npm run generate -- --checkpoint artifacts/bigram-v1.json --prompt "Nexus " --tokens 160
 npm run train:context -- --input data/corpus.txt --epochs 30 --learning-rate 0.03 --output artifacts/context-mlp-v1.json
 npm run generate:context -- --checkpoint artifacts/context-mlp-v1.json --prompt "Nexus " --tokens 160
+npm run evaluate -- --input data/corpus.txt --epochs 20
 ```
 
 The web runtime's seed corpus is deliberately tiny and trained on cold start per server instance. Outputs are expected to be incoherent. It is only there to prove the application-to-model inference path without an external AI provider. Meaningful training requires a much larger licensed, curated dataset, evaluation splits, and measurable benchmarks. Never ingest private conversations or personal data without an explicit, appropriate data policy and consent.
 
 ## Design limits
 
-The bigram baseline predicts one byte from the previous byte. The context MLP conditions on a fixed window of preceding bytes through learned embeddings and a hidden layer, and is trained with next-token cross-entropy. It is still a small experimental model—not a transformer, not a general-purpose assistant, and not evidence of semantic understanding. The seed corpus is far too small to produce useful language. Next: add a held-out validation/test pipeline, report baseline comparisons and sampling quality, improve dataset ingestion/provenance, and only then decide whether a transformer implementation is justified.
+The bigram baseline predicts one byte from the previous byte. The context MLP conditions on a fixed window of preceding bytes through learned embeddings and a hidden layer, and is trained with next-token cross-entropy. It is still a small experimental model—not a transformer, not a general-purpose assistant, and not evidence of semantic understanding. The seed corpus is far too small to produce useful language. The evaluation CLI now reports held-out negative log-likelihood and perplexity for both model families using a deterministic ordered 80/10/10 byte split. This tiny corpus is only a smoke benchmark; it is not a reliable estimate of generalization. Next: use a larger licensed corpus with a fixed, deduplicated test set and persist run metadata/metrics in Neon.
 
 ## Database
 
-Apply SQL files in `database/migrations` to the Neon PostgreSQL project. Checkpoints and large training artifacts should live in versioned file/object storage; PostgreSQL stores metadata and checksums rather than multi-megabyte weight arrays as ordinary rows.
+Apply SQL files in `database/migrations` to the Neon PostgreSQL project in order. Migration `0002_experiment_metrics.sql` adds dataset split manifests and initial/validation/test metrics to experiment metadata. These migrations are versioned but have not been applied to the live database. Checkpoints and large training artifacts should live in versioned file/object storage; PostgreSQL stores metadata and checksums rather than multi-megabyte weight arrays as ordinary rows.
 
 ## Workflow
 
