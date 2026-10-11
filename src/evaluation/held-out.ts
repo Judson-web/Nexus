@@ -11,11 +11,17 @@ export interface HeldOutMetrics {
   readonly perplexity: number;
 }
 
-function meanNegativeLogLikelihood(probabilities: (context: number[]) => Float64Array, tokens: readonly number[], contextSize: number): HeldOutMetrics {
-  if (tokens.length <= contextSize) throw new Error("Held-out split is too small to evaluate.");
+function meanNegativeLogLikelihood(
+  probabilities: (context: number[]) => Float64Array,
+  tokens: readonly number[],
+  contextSize: number,
+  start: number,
+  end: number,
+): HeldOutMetrics {
+  if (start < contextSize || end > tokens.length || start >= end) throw new Error("Held-out split is too small to evaluate.");
   let total = 0;
   let count = 0;
-  for (let i = contextSize; i < tokens.length; i += 1) {
+  for (let i = start; i < end; i += 1) {
     const context = tokens.slice(i - contextSize, i);
     const distribution = probabilities(context);
     const probability = distribution[tokens[i]!]!;
@@ -41,8 +47,8 @@ export async function evaluateHeldOutFile(path = "data/corpus.txt", epochs = 20)
   bigram.train([...trainTokens, 256], 0.08, epochs);
   const context = new ContextModel({ ...DEFAULT_CONTEXT_CONFIG, seed: 41 });
   context.train([...trainTokens, 256], 0.03, epochs);
-  const bigramRaw = meanNegativeLogLikelihood((ctx) => bigram.probabilities(ctx[ctx.length - 1]!), testTokens, 1);
-  const contextRaw = meanNegativeLogLikelihood((ctx) => context.probabilities(ctx), testTokens, context.config.contextSize);
+  const bigramRaw = meanNegativeLogLikelihood((ctx) => bigram.probabilities(ctx[ctx.length - 1]!), tokens, 1, testStart, tokens.length);
+  const contextRaw = meanNegativeLogLikelihood((ctx) => context.probabilities(ctx), tokens, context.config.contextSize, testStart, tokens.length);
   return {
     split: { method: "ordered 80/10/10 byte split", totalTokens: tokens.length, trainTokens: trainTokens.length, validationTokens: testStart - trainEnd, testTokens: testTokens.length },
     evaluations: [
