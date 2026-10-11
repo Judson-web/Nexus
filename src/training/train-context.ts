@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { ByteTokenizer } from "../tokenizer/byte-tokenizer.js";
 import { ContextModel, DEFAULT_CONTEXT_CONFIG } from "../model/context-model.js";
-import { failTrainingRun, finishTrainingRun, startTrainingRun } from "./experiment-store.js";
+import { failTrainingRun, finishTrainingRun, registerModelVersion, startTrainingRun } from "./experiment-store.js";
 
 export interface ContextTrainOptions {
   readonly inputPath: string;
@@ -35,6 +35,15 @@ export async function trainContextFromFile(options: ContextTrainOptions) {
     await rename(temporary, options.outputPath);
     await writeFile(options.outputPath + ".sha256", sha256 + "  " + bytes.length + "\n", { flag: "w" });
     await finishTrainingRun(runId, { finalLoss: metrics.loss, initialLoss });
+    await registerModelVersion({
+      trainingRunId: runId,
+      modelFamily: "nexus-context-mlp",
+      version: sha256.slice(0, 16),
+      checkpointUri: options.outputPath,
+      checkpointSha256: sha256,
+      config: { ...model.config, epochs: options.epochs, learningRate: options.learningRate },
+      parameterCount: checkpoint.embedding.length + checkpoint.w1.length + checkpoint.b1.length + checkpoint.w2.length + checkpoint.b2.length,
+    });
     return { ...metrics, initialLoss, finalLoss: metrics.loss, checkpointPath: options.outputPath, checksum: sha256, checkpointBytes: bytes.length, modelFamily: "nexus-context-mlp", parameterCount: checkpoint.embedding.length + checkpoint.w1.length + checkpoint.b1.length + checkpoint.w2.length + checkpoint.b2.length };
   } catch (error) {
     await failTrainingRun(runId, error);
