@@ -14,7 +14,7 @@ export interface TransformerGradientResult {
  */
 export function transformerLossAndGradients(
   config: TransformerConfig,
-  weights: readonly number[],
+  weights: ArrayLike<number>,
   context: readonly number[],
   target: number,
 ): TransformerGradientResult {
@@ -35,7 +35,7 @@ export function transformerLossAndGradients(
     throw new RangeError("Invalid context for Transformer gradient.");
   }
   if (!Number.isSafeInteger(target) || target < 0 || target >= v) throw new RangeError("Invalid target token.");
-  const parameters = weights.map((weight) => Value.of(weight));
+  const parameters = Array.from(weights, (weight) => Value.of(weight));
   const get = (name: string, index: number): Value => {
     const range = ranges[name]!;
     return parameters[range.start + index]!;
