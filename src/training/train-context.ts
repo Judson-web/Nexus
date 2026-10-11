@@ -31,7 +31,7 @@ export async function trainContextFromFile(options: ContextTrainOptions) {
 
 export async function loadContextCheckpoint(path: string): Promise<ContextModel> {
   const bytes = await readFile(path);
-  const expected = (await readFile(`${path}.sha256`, "utf8")).trim().split(/\\s+/)[0];
+  const expected = (await readFile(`${path}.sha256`, "utf8")).trim().split(/\s+/)[0];
   const actual = createHash("sha256").update(bytes).digest("hex");
   if (!expected || expected !== actual) throw new Error("Context checkpoint checksum mismatch; refusing to load.");
   return ContextModel.fromCheckpoint(JSON.parse(bytes.toString("utf8")) as unknown);
