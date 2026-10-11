@@ -45,7 +45,8 @@ function validateManifest(value: unknown): DatasetManifest {
     if (example.id !== example.sha256.slice(0, 24)) throw new Error("Dataset manifest example ID does not match its hash.");
     if (ids.has(example.sha256)) throw new Error("Dataset manifest contains duplicate examples.");
     ids.add(example.sha256);
-    splitCounts[example.split] += 1;
+    const split = example.split as DatasetSplit;
+    splitCounts[split] += 1;
   }
   for (const split of ["train", "validation", "test"] as const) {
     if (!Number.isInteger(manifest.splits[split]) || manifest.splits[split] !== splitCounts[split]) {
