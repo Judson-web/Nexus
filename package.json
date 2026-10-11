@@ -14,6 +14,8 @@
     "generate": "tsx src/cli.ts generate",
     "train:context": "tsx src/cli/context.ts train",
     "generate:context": "tsx src/cli/context.ts generate",
+    "train:transformer": "tsx src/cli/transformer.ts train",
+    "generate:transformer": "tsx src/cli/transformer.ts generate",
     "evaluate": "tsx src/cli/evaluate.ts",
     "prepare:dataset": "tsx src/cli/prepare-dataset.ts",
     "evaluate:manifest": "tsx src/cli/evaluate-manifest.ts"
