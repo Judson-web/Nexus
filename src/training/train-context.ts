@@ -24,7 +24,7 @@ export async function trainContextFromFile(options: ContextTrainOptions) {
     config: { ...model.config, epochs: options.epochs, learningRate: options.learningRate, inputPath: options.inputPath },
   });
   try {
-    const initialLoss = model.train(tokens, options.learningRate, 1).loss;
+    const initialLoss = measureLoss(model, tokens);
     const metrics = model.train(tokens, options.learningRate, options.epochs);
     const checkpoint = model.toCheckpoint();
     const bytes = Buffer.from(JSON.stringify(checkpoint), "utf8");
@@ -46,9 +46,25 @@ export async function trainContextFromFile(options: ContextTrainOptions) {
     await finishTrainingRun(runId, { finalLoss: metrics.loss, initialLoss });
     return { ...metrics, initialLoss, finalLoss: metrics.loss, checkpointPath: options.outputPath, checksum: sha256, checkpointBytes: bytes.length, modelFamily: "nexus-context-mlp", parameterCount: checkpoint.embedding.length + checkpoint.w1.length + checkpoint.b1.length + checkpoint.w2.length + checkpoint.b2.length };
   } catch (error) {
-    await failTrainingRun(runId, error);
+    try {
+      await failTrainingRun(runId, error);
+    } catch (persistenceError) {
+      if (error instanceof Error) {
+        error.message += ` (Additionally failed to persist training failure: ${persistenceError instanceof Error ? persistenceError.message : String(persistenceError)})`;
+      }
+    }
     throw error;
   }
+}
+
+function measureLoss(model: ContextModel, tokens: readonly number[]): number {
+  let total = 0;
+  for (let position = 0; position < tokens.length; position += 1) {
+    const context = tokens.slice(Math.max(0, position - model.config.contextSize), position);
+    const distribution = model.probabilities(context);
+    total -= Math.log(Math.max(distribution[tokens[position]!]!, Number.MIN_VALUE));
+  }
+  return total / tokens.length;
 }
 
 export async function loadContextCheckpoint(path: string): Promise<ContextModel> {
