@@ -81,7 +81,7 @@ export class CausalAttentionModel {
     const vectors: Float64Array[] = ids.map((id) => this.embedding.slice(id * embeddingSize, (id + 1) * embeddingSize));
     const last = contextSize - 1;
     const scores = new Float64Array(contextSize);
-    for (let i = 0; i <= last; i++) scores[i] = this.positionBias[last - i];
+    for (let i = 0; i <= last; i++) scores[i] = this.positionBias[last - i]!;
     const max = Math.max(...scores);
     let total = 0;
     for (let i = 0; i <= last; i++) { scores[i] = Math.exp(scores[i]! - max); total += scores[i]!; }
