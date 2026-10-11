@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { ByteTokenizer } from "../tokenizer/byte-tokenizer.js";
 import { ContextModel, DEFAULT_CONTEXT_CONFIG } from "../model/context-model.js";
-import { finishTrainingRun, startTrainingRun } from "./experiment-store.js";
+import { failTrainingRun, finishTrainingRun, startTrainingRun } from "./experiment-store.js";
 
 export interface ContextTrainOptions {
   readonly inputPath: string;
@@ -23,16 +23,23 @@ export async function trainContextFromFile(options: ContextTrainOptions) {
     seed: options.seed,
     config: { ...model.config, epochs: options.epochs, learningRate: options.learningRate, inputPath: options.inputPath },
   });
-  const initialLoss = model.train(tokens, options.learningRate, 1).loss;
-  const metrics = model.train(tokens, options.learningRate, options.epochs);
-  const bytes = Buffer.from(JSON.stringify(model.toCheckpoint()), "utf8");
-  const sha256 = createHash("sha256").update(bytes).digest("hex");
-  await mkdir(dirname(options.outputPath), { recursive: true });
-  const temporary = `${options.outputPath}.tmp`;
-  await writeFile(temporary, bytes, { flag: "w" });
-  await rename(temporary, options.outputPath);
-  await writeFile(`${options.outputPath}.sha256`, `${sha256}  ${bytes.length}\n`, { flag: "w" });
-  return { ...metrics, initialLoss, finalLoss: metrics.loss, checkpointPath: options.outputPath, checksum: sha256, checkpointBytes: bytes.length, modelFamily: "nexus-context-mlp", parameterCount: model.toCheckpoint().embedding.length + model.toCheckpoint().w1.length + model.toCheckpoint().b1.length + model.toCheckpoint().w2.length + model.toCheckpoint().b2.length };
+  try {
+    const initialLoss = model.train(tokens, options.learningRate, 1).loss;
+    const metrics = model.train(tokens, options.learningRate, options.epochs);
+    const checkpoint = model.toCheckpoint();
+    const bytes = Buffer.from(JSON.stringify(checkpoint), "utf8");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    await mkdir(dirname(options.outputPath), { recursive: true });
+    const temporary = options.outputPath + ".tmp";
+    await writeFile(temporary, bytes, { flag: "w" });
+    await rename(temporary, options.outputPath);
+    await writeFile(options.outputPath + ".sha256", sha256 + "  " + bytes.length + "\n", { flag: "w" });
+    await finishTrainingRun(runId, { finalLoss: metrics.loss, initialLoss });
+    return { ...metrics, initialLoss, finalLoss: metrics.loss, checkpointPath: options.outputPath, checksum: sha256, checkpointBytes: bytes.length, modelFamily: "nexus-context-mlp", parameterCount: checkpoint.embedding.length + checkpoint.w1.length + checkpoint.b1.length + checkpoint.w2.length + checkpoint.b2.length };
+  } catch (error) {
+    await failTrainingRun(runId, error);
+    throw error;
+  }
 }
 
 export async function loadContextCheckpoint(path: string): Promise<ContextModel> {
