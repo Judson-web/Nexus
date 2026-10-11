@@ -13,7 +13,8 @@
     "train": "tsx src/cli.ts train",
     "generate": "tsx src/cli.ts generate",
     "train:context": "tsx src/cli/context.ts train",
-    "generate:context": "tsx src/cli/context.ts generate"
+    "generate:context": "tsx src/cli/context.ts generate",
+    "evaluate": "tsx src/cli/evaluate.ts"
   },
   "dependencies": {
     "next": "^15.5.0",
