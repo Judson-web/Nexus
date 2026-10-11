@@ -36,7 +36,7 @@ export async function trainContextFromFile(options: ContextTrainOptions) {
     await writeFile(options.outputPath + ".sha256", sha256 + "  " + bytes.length + "\n", { flag: "w" });
     await finishTrainingRun(runId, { finalLoss: metrics.loss, initialLoss });
     await registerModelVersion({
-      trainingRunId: runId,
+      ...(runId ? { trainingRunId: runId } : {}),
       modelFamily: "nexus-context-mlp",
       version: sha256.slice(0, 16),
       checkpointUri: options.outputPath,
