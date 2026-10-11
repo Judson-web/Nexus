@@ -8,6 +8,7 @@ export interface TrainingRunRecord {
 
 export interface EvaluationRecord {
   readonly modelFamily: string;
+  readonly modelVersion: string;
   readonly datasetId?: string;
   readonly metrics: Record<string, unknown>;
   readonly notes?: string;
@@ -107,11 +108,11 @@ export async function recordEvaluation(records: readonly EvaluationRecord[]): Pr
     for (const record of records) {
       const inserted = await client.query(
         `INSERT INTO public.evaluation_runs (model_version_id, dataset_id, metrics, passed, notes)
-         SELECT mv.id, $2::uuid, $3::jsonb, false, $4
+         SELECT mv.id, $3::uuid, $4::jsonb, false, $5
          FROM public.model_versions mv
-         WHERE mv.model_family = $1
-         ORDER BY mv.created_at DESC LIMIT 1`,
-        [record.modelFamily, record.datasetId ?? null, JSON.stringify(record.metrics),
+         WHERE mv.model_family = $1 AND mv.version = $2
+         LIMIT 1`,
+        [record.modelFamily, record.modelVersion, record.datasetId ?? null, JSON.stringify(record.metrics),
           record.notes ?? "Held-out diagnostic evaluation; not a production approval."],
       );
       if (inserted.rowCount === 0) {
