@@ -21,29 +21,51 @@ interface Score {
 function validateManifest(value: unknown): DatasetManifest {
   if (!value || typeof value !== "object") throw new Error("Dataset manifest must be a JSON object.");
   const manifest = value as Partial<DatasetManifest>;
+  const isSha256 = (digest: unknown): digest is string =>
+    typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest);
   if (manifest.formatVersion !== 1 || !Array.isArray(manifest.examples) ||
-      !manifest.splits || typeof manifest.sourceSha256 !== "string" ||
-      typeof manifest.preparedSha256 !== "string") {
+      !manifest.splits || typeof manifest.splits !== "object" ||
+      !isSha256(manifest.sourceSha256) || !isSha256(manifest.preparedSha256) ||
+      !Number.isSafeInteger(manifest.splitSeed) || manifest.splitSeed! < 0 ||
+      !manifest.ratios || ![manifest.ratios.train, manifest.ratios.validation, manifest.ratios.test]
+        .every((ratio) => Number.isFinite(ratio) && ratio! > 0) ||
+      Math.abs(manifest.ratios.train + manifest.ratios.validation + manifest.ratios.test - 1) > 1e-9) {
     throw new Error("Unsupported or malformed dataset manifest.");
   }
   const ids = new Set<string>();
+  const splitCounts: Record<DatasetSplit, number> = { train: 0, validation: 0, test: 0 };
   for (const example of manifest.examples) {
-    if (!example || typeof example.text !== "string" || !/^[a-f0-9]{64}$/.test(example.sha256) ||
+    if (!example || typeof example.text !== "string" || example.text.length === 0 ||
+        !isSha256(example.sha256) || typeof example.id !== "string" ||
         !["train", "validation", "test"].includes(example.split)) {
       throw new Error("Dataset manifest contains a malformed example.");
     }
+    const actualHash = createHash("sha256").update(example.text, "utf8").digest("hex");
+    if (actualHash !== example.sha256) throw new Error("Dataset manifest example text hash does not match.");
+    if (example.id !== example.sha256.slice(0, 24)) throw new Error("Dataset manifest example ID does not match its hash.");
     if (ids.has(example.sha256)) throw new Error("Dataset manifest contains duplicate examples.");
     ids.add(example.sha256);
+    splitCounts[example.split] += 1;
   }
   for (const split of ["train", "validation", "test"] as const) {
-    if (!Number.isInteger(manifest.splits[split]) ||
-        manifest.splits[split] !== manifest.examples.filter((example) => example.split === split).length) {
+    if (!Number.isInteger(manifest.splits[split]) || manifest.splits[split] !== splitCounts[split]) {
       throw new Error(`Dataset manifest ${split} count does not match its examples.`);
     }
   }
-  if (manifest.examples.length === 0 || manifest.splits.train < 1 ||
-      manifest.splits.validation < 1 || manifest.splits.test < 1) {
+  if (manifest.examples.length === 0 || splitCounts.train < 1 ||
+      splitCounts.validation < 1 || splitCounts.test < 1) {
     throw new Error("Manifest must contain at least one example in every split.");
+  }
+  if (manifest.acceptedExamples !== manifest.examples.length) {
+    throw new Error("Dataset manifest accepted-example count does not match its examples.");
+  }
+  const preparedPayload = [...manifest.examples]
+    .sort((a, b) => a.sha256.localeCompare(b.sha256))
+    .map((example) => example.sha256 + ":" + example.split)
+    .join("\n");
+  const actualPreparedHash = createHash("sha256").update(preparedPayload, "utf8").digest("hex");
+  if (actualPreparedHash !== manifest.preparedSha256) {
+    throw new Error("Dataset manifest prepared-content hash does not match its examples.");
   }
   return manifest as DatasetManifest;
 }
