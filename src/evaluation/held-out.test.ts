@@ -14,11 +14,17 @@ test("held-out evaluation scores every test token with preceding context", async
     const report = await evaluateHeldOutFile(path, 1);
     assert.equal(report.split.method, "ordered 80/10/10 byte split");
     assert.equal(report.evaluations.length, 2);
+    assert.match(report.dataset.sourceSha256, /^[a-f0-9]{64}$/);
+    assert.match(report.dataset.evaluatedContentSha256, /^[a-f0-9]{64}$/);
     for (const result of report.evaluations) {
       assert.equal(result.testTokens, report.split.testTokens);
-      assert.ok(Number.isFinite(result.negativeLogLikelihood));
-      assert.ok(Number.isFinite(result.perplexity));
-      assert.ok(result.perplexity >= 1);
+      assert.equal(result.validationTokens, report.split.validationTokens);
+      assert.ok(Number.isFinite(result.validationNegativeLogLikelihood));
+      assert.ok(Number.isFinite(result.validationPerplexity));
+      assert.ok(Number.isFinite(result.testNegativeLogLikelihood));
+      assert.ok(Number.isFinite(result.testPerplexity));
+      assert.ok(result.validationPerplexity >= 1);
+      assert.ok(result.testPerplexity >= 1);
     }
   } finally {
     await rm(directory, { recursive: true, force: true });
