@@ -1,7 +1,0 @@
-Nexus is an independent research project.
-We build software carefully, test our assumptions, and measure results.
-A language model learns patterns from examples and predicts the next token.
-Good training data is relevant, lawful to use, diverse, and well documented.
-A small model is a starting point for experiments, not a substitute for evaluation.
-TypeScript can make data pipelines and training tools easier to maintain.
-Reliable experiments record the dataset, configuration, random seed, and checkpoint.

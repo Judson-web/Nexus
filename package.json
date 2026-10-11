@@ -6,7 +6,7 @@
   "description": "A TypeScript-first research project for a progressively trained language model.",
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "tsx --test src/model/*.test.ts src/tokenizer/*.test.ts",
+    "test": "tsx --test src/model/*.test.ts src/tokenizer/*.test.ts src/training/*.test.ts",
     "train": "tsx src/cli.ts train",
     "generate": "tsx src/cli.ts generate"
   },
