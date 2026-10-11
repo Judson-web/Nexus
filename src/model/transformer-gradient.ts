@@ -106,8 +106,8 @@ export function transformerLossAndGradients(
   const hidden = vector(f, (j) => {
     let z = get("ff1Bias", j);
     for (let i = 0; i < e; i++) z = add(z, mul(state[i]!, get("ff1", i * f + j)));
-    const inner = z.add(mul(z.pow(3), 0.044715)).mul(Math.sqrt(2 / Math.PI)).tanh();
-    return mul(mul(z, 0.5), inner.add(1));
+    const inner = z.add(z.pow(3).mul(0.044715)).mul(Math.sqrt(2 / Math.PI)).tanh();
+    return z.mul(0.5).mul(inner.add(1));
   });
   const ffOutput = vector(e, (j) => {
     let out = get("ff2Bias", j);
