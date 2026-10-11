@@ -4,7 +4,7 @@ Nexus is a TypeScript-first research project for building and progressively trai
 
 ## Current milestone
 
-The repository includes a small byte-level bigram neural language model, a responsive Next.js playground, and a Node.js inference endpoint that trains a tiny seed model in memory. This is an end-to-end runtime smoke test, not a capable conversational assistant.
+The repository includes two in-repository CPU language-model baselines: a byte-level bigram model and a context-window neural MLP with learned byte embeddings, a tanh hidden layer, and a softmax next-byte head. The current web endpoint still uses the tiny bigram baseline; the context MLP is a research/training milestone and is not yet promoted to serving.
 
 - Deterministic model initialization, UTF-8 byte tokenizer, and CPU training.
 - Versioned JSON checkpoints with checksum verification.
@@ -25,13 +25,15 @@ npm run build
 npm run dev
 npm run train -- --input data/corpus.txt --epochs 30 --learning-rate 0.08 --output artifacts/bigram-v1.json
 npm run generate -- --checkpoint artifacts/bigram-v1.json --prompt "Nexus " --tokens 160
+npm run train:context -- --input data/corpus.txt --epochs 30 --learning-rate 0.03 --output artifacts/context-mlp-v1.json
+npm run generate:context -- --checkpoint artifacts/context-mlp-v1.json --prompt "Nexus " --tokens 160
 ```
 
 The web runtime's seed corpus is deliberately tiny and trained on cold start per server instance. Outputs are expected to be incoherent. It is only there to prove the application-to-model inference path without an external AI provider. Meaningful training requires a much larger licensed, curated dataset, evaluation splits, and measurable benchmarks. Never ingest private conversations or personal data without an explicit, appropriate data policy and consent.
 
 ## Design limits
 
-The current model predicts local byte-to-byte transitions. It has no long context, semantic understanding, transformer blocks, or useful general-purpose chat capability. Do not interpret the playground as a production AI assistant. The next engineering milestone is a more expressive model architecture with held-out evaluation and persistent, versioned checkpoints.
+The bigram baseline predicts one byte from the previous byte. The context MLP conditions on a fixed window of preceding bytes through learned embeddings and a hidden layer, and is trained with next-token cross-entropy. It is still a small experimental model—not a transformer, not a general-purpose assistant, and not evidence of semantic understanding. The seed corpus is far too small to produce useful language. Next: add a held-out validation/test pipeline, report baseline comparisons and sampling quality, improve dataset ingestion/provenance, and only then decide whether a transformer implementation is justified.
 
 ## Database
 
