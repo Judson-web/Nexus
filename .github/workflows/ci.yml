@@ -25,4 +25,6 @@ jobs:
       - run: npm test
       - run: npm run train -- --epochs 2 --output /tmp/nexus-smoke.json
       - run: npm run generate -- --checkpoint /tmp/nexus-smoke.json --prompt "Nexus" --tokens 12
+      - run: npm run train:context -- --epochs 2 --output /tmp/nexus-context-smoke.json
+      - run: npm run generate:context -- --checkpoint /tmp/nexus-context-smoke.json --prompt "Nexus" --tokens 12
       - run: npm run build
