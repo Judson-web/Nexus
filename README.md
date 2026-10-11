@@ -4,17 +4,16 @@ Nexus is a TypeScript-first research project for building and progressively trai
 
 ## Current milestone
 
-This repository starts with a deliberately small, byte-level bigram neural language model. It is a real trainable baseline and engineering testbed, not a claim of modern conversational capability. The next stages can replace or extend the model behind the same training/evaluation boundaries.
+The repository includes a small byte-level bigram neural language model, a responsive Next.js playground, and a Node.js inference endpoint that trains a tiny seed model in memory. This is an end-to-end runtime smoke test, not a capable conversational assistant.
 
-- Deterministic initialization and reproducible training.
-- UTF-8 byte tokenizer with a dedicated end-of-sequence token.
-- CPU-only next-token training and generation.
-- Versioned, validated JSON checkpoints with checksums.
-- Tests for tokenizer, learning behavior, and checkpoint integrity.
-- PostgreSQL migrations for datasets, runs, model versions, and evaluation metadata.
-- No third-party inference APIs; no production deployment in routine development.
+- Deterministic model initialization, UTF-8 byte tokenizer, and CPU training.
+- Versioned JSON checkpoints with checksum verification.
+- Responsive model playground at `/` and input-validated `POST /api/generate`.
+- No third-party AI inference APIs or provider keys.
+- PostgreSQL schema for dataset metadata, training runs, model versions, and evaluation metadata.
+- Git-based Vercel builds are intentionally ignored; deployments must be explicitly initiated after verification.
 
-## Requirements
+## Requirements and commands
 
 Node.js 22 or newer.
 
@@ -22,20 +21,22 @@ Node.js 22 or newer.
 npm install
 npm run check
 npm test
+npm run build
+npm run dev
 npm run train -- --input data/corpus.txt --epochs 30 --learning-rate 0.08 --output artifacts/bigram-v1.json
 npm run generate -- --checkpoint artifacts/bigram-v1.json --prompt "Nexus " --tokens 160
 ```
 
-The included corpus is only a smoke-test seed. For meaningful training, provide a licensed, curated corpus with enough diverse examples. Never ingest private conversations or personal data without an explicit, appropriate data policy and consent.
+The web runtime's seed corpus is deliberately tiny and trained on cold start per server instance. Outputs are expected to be incoherent. It is only there to prove the application-to-model inference path without an external AI provider. Meaningful training requires a much larger licensed, curated dataset, evaluation splits, and measurable benchmarks. Never ingest private conversations or personal data without an explicit, appropriate data policy and consent.
 
 ## Design limits
 
-The first model learns local byte-to-byte transitions only. It has no long context, semantic understanding, transformer blocks, or useful general-purpose chat ability. The point of this milestone is to prove a transparent end-to-end training and inference path before scaling model complexity.
+The current model predicts local byte-to-byte transitions. It has no long context, semantic understanding, transformer blocks, or useful general-purpose chat capability. Do not interpret the playground as a production AI assistant. The next engineering milestone is a more expressive model architecture with held-out evaluation and persistent, versioned checkpoints.
 
 ## Database
 
-Apply SQL files in `database/migrations` to the new Neon PostgreSQL project. Checkpoints and large training artifacts should live in versioned file/object storage; PostgreSQL stores metadata and checksums, not multi-megabyte weight arrays as ordinary rows.
+Apply SQL files in `database/migrations` to the Neon PostgreSQL project. Checkpoints and large training artifacts should live in versioned file/object storage; PostgreSQL stores metadata and checksums rather than multi-megabyte weight arrays as ordinary rows.
 
 ## Workflow
 
-Develop on feature branches. Keep `main` stable. Do not merge or deploy without explicit instruction and verification.
+Develop on feature branches. TypeScript checks, tests, and production builds run in GitHub Actions. Vercel's Git build-ignore setting prevents automatic deployments from routine commits; production deployment is a separate, explicit action after verification.
