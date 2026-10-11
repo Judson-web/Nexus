@@ -1,4 +1,5 @@
 import { SeededRandom } from "../core/random.js";
+import { transformerLossAndGradients } from "./transformer-gradient.js";
 
 export interface TransformerConfig {
   readonly vocabSize: number;
@@ -220,9 +221,8 @@ export class TransformerModel {
   }
 
   /**
-   * SPSA trains the complete parameter vector using paired perturbations.
-   * This is computationally expensive and intentionally limited to small
-   * experiments until exact backpropagation is implemented.
+   * Trains using reverse-mode analytical gradients through the complete
+   * single-block Transformer. One example is accumulated and applied at a time.
    */
   public train(tokens: readonly number[], learningRate = 0.002, epochs = 1): TransformerMetrics {
     this.validateTokens(tokens);
@@ -231,40 +231,22 @@ export class TransformerModel {
     if (!Number.isFinite(learningRate) || learningRate <= 0 || learningRate > 0.02) {
       throw new RangeError("learningRate must be in (0, 0.02].");
     }
-    if (this.weights.length > 100_000) throw new RangeError("SPSA training is limited to 100000 parameters.");
-    const random = new SeededRandom(this.config.seed + tokens.length + epochs);
-    const perturbation = new Float64Array(this.weights.length);
-    const gradient = new Float64Array(this.weights.length);
-    const original = new Float64Array(this.weights.length);
-    const lossFor = (start: number, end: number): number => {
-      let loss = 0;
-      let count = 0;
-      for (let i = start; i < end; i++) {
-        const probs = this.forward(tokens.slice(Math.max(0, i - this.config.contextSize), i));
-        loss -= Math.log(Math.max(Number.MIN_VALUE, probs[tokens[i]!]!));
-        count++;
-      }
-      return loss / Math.max(1, count);
-    };
+    const examples = tokens.length - 1;
     let loss = 0;
-    let examples = 0;
     for (let epoch = 0; epoch < epochs; epoch++) {
-      const before = Math.max(1e-4, 0.05 / Math.sqrt(epoch + 1));
-      for (let i = 0; i < this.weights.length; i++) {
-        original[i] = this.weights[i]!;
-        perturbation[i] = random.next() < 0.5 ? -1 : 1;
-        this.weights[i] = original[i]! + before * perturbation[i]!;
+      loss = 0;
+      for (let i = 1; i < tokens.length; i++) {
+        const context = tokens.slice(Math.max(0, i - this.config.contextSize), i);
+        const result = transformerLossAndGradients(this.config, this.weights, context, tokens[i]!);
+        if (!Number.isFinite(result.loss) || result.gradients.some((gradient) => !Number.isFinite(gradient))) {
+          throw new Error("Transformer training produced a non-finite loss or gradient.");
+        }
+        loss += result.loss;
+        for (let j = 0; j < this.weights.length; j++) {
+          this.weights[j] = this.weights[j]! - learningRate * result.gradients[j]!;
+        }
       }
-      const plus = lossFor(1, tokens.length);
-      for (let i = 0; i < this.weights.length; i++) this.weights[i] = original[i]! - before * perturbation[i]!;
-      const minus = lossFor(1, tokens.length);
-      const scale = (plus - minus) / (2 * before);
-      for (let i = 0; i < this.weights.length; i++) {
-        gradient[i] = scale * perturbation[i]!;
-        this.weights[i] = original[i]! - learningRate * gradient[i]!;
-      }
-      loss = lossFor(1, tokens.length);
-      examples = tokens.length - 1;
+      loss /= examples;
     }
     return { loss, examples };
   }
