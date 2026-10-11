@@ -1,5 +1,5 @@
 import { ByteTokenizer } from "../tokenizer/byte-tokenizer.js";
-import { loadContextCheckpoint, trainContextFromFile } from "./train-context.js";
+import { loadContextCheckpoint, trainContextFromFile } from "../training/train-context.js";
 
 function parse(args: string[]): Map<string, string> {
   const result = new Map<string, string>();
