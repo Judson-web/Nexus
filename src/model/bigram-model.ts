@@ -68,11 +68,14 @@ export class BigramModel {
           probabilities[token] = probability;
           sum += probability;
         }
-        for (let token = 0; token < vocab; token += 1) probabilities[token] /= sum;
+        for (let token = 0; token < vocab; token += 1) {
+          probabilities[token] = probabilities[token]! / sum;
+        }
         lossSum -= Math.log(Math.max(probabilities[target]!, Number.MIN_VALUE));
         for (let token = 0; token < vocab; token += 1) {
           const gradient = probabilities[token]! - (token === target ? 1 : 0);
-          this.weights[offset + token] -= learningRate * gradient;
+          const weightIndex = offset + token;
+          this.weights[weightIndex] = this.weights[weightIndex]! - learningRate * gradient;
         }
         examples += 1;
       }
@@ -92,7 +95,7 @@ export class BigramModel {
       result[i] = Math.exp(this.weights[offset + i]! - max);
       total += result[i]!;
     }
-    for (let i = 0; i < vocab; i += 1) result[i] /= total;
+    for (let i = 0; i < vocab; i += 1) result[i] = result[i]! / total;
     return result;
   }
 
@@ -110,6 +113,7 @@ export class BigramModel {
 
   public generate(prompt: readonly number[], maxTokens: number, random: () => number = Math.random): number[] {
     this.validateTokens(prompt);
+    if (prompt.length === 0) throw new Error("Prompt must contain at least one token.");
     if (!Number.isInteger(maxTokens) || maxTokens < 0 || maxTokens > 100000) {
       throw new RangeError("maxTokens must be an integer between 0 and 100000.");
     }

@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { ByteTokenizer } from "./tokenizer/byte-tokenizer.js";
 import { trainFromFile } from "./training/train.js";
 import { loadCheckpoint } from "./training/checkpoint.js";
