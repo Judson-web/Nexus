@@ -5,6 +5,7 @@ import { ByteTokenizer } from "../../../src/tokenizer/byte-tokenizer.js";
 export const runtime = "nodejs";
 export const maxDuration = 10;
 
+const MAX_BODY_BYTES = 4096;
 const CORPUS = [
   "Nexus is an independent research project building a language model from the ground up.",
   "A language model learns patterns from examples and predicts the next token.",
@@ -25,13 +26,54 @@ function getModel(): BigramModel {
   return model;
 }
 
+async function readBoundedJson(request: Request): Promise<unknown> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null) {
+    const declaredLength = Number(contentLength);
+    if (!Number.isSafeInteger(declaredLength) || declaredLength < 0 || declaredLength > MAX_BODY_BYTES) {
+      throw new RangeError("Request body must be 4 KB or smaller.");
+    }
+  }
+
+  if (!request.body) throw new SyntaxError("Request body is required.");
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_BODY_BYTES) {
+        await reader.cancel("Request body too large.");
+        throw new RangeError("Request body must be 4 KB or smaller.");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
+}
+
 export async function POST(request: Request) {
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
+    body = await readBoundedJson(request);
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return NextResponse.json({ error: error.message }, { status: 413 });
+    }
     return NextResponse.json({ error: "Send a valid JSON request." }, { status: 400 });
   }
+
   if (!body || typeof body !== "object" || !("prompt" in body) || typeof body.prompt !== "string") {
     return NextResponse.json({ error: "A text prompt is required." }, { status: 400 });
   }
