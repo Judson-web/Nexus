@@ -38,7 +38,7 @@ The bigram baseline predicts one byte from the previous byte. The context MLP co
 
 ## Database
 
-Apply SQL files in `database/migrations` to the Neon PostgreSQL project in order. Migration `0002_experiment_metrics.sql` adds dataset split manifests and initial/validation/test metrics to experiment metadata. These migrations are versioned but have not been applied to the live database. Checkpoints and large training artifacts should live in versioned file/object storage; PostgreSQL stores metadata and checksums rather than multi-megabyte weight arrays as ordinary rows.
+Apply SQL files in `database/migrations` to the Neon PostgreSQL project in order. Migration `0002_experiment_metrics.sql` adds dataset split manifests and initial/validation/test metrics to experiment metadata. These migrations are versioned but have not been applied to the live database. Set `DATABASE_URL` to enable optional training-run metadata persistence; without it, training runs locally without database access. The current trainer records running/succeeded status and final loss using the existing `training_runs` table. Checkpoints and large training artifacts should live in versioned file/object storage; PostgreSQL stores metadata and checksums rather than multi-megabyte weight arrays as ordinary rows.
 
 ## Workflow
 
