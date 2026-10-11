@@ -25,4 +25,13 @@ jobs:
       - run: npm test
       - run: npm run train -- --epochs 2 --output /tmp/nexus-smoke.json
       - run: npm run generate -- --checkpoint /tmp/nexus-smoke.json --prompt "Nexus" --tokens 12
+      - run: npm run train:context -- --epochs 2 --output /tmp/nexus-context-smoke.json
+      - run: npm run generate:context -- --checkpoint /tmp/nexus-context-smoke.json --prompt "Nexus" --tokens 12
+      - run: npm run evaluate -- --epochs 2
+      - name: Verify manifest-driven evaluation
+        run: |
+          mkdir -p /tmp/nexus-data
+          for i in $(seq 1 120); do echo "Nexus dataset sample $i supports repeatable training and evaluation."; done > /tmp/nexus-data/corpus.txt
+          npm run prepare:dataset -- --input /tmp/nexus-data/corpus.txt --output /tmp/nexus-data/manifest.json --seed 17
+          npm run evaluate:manifest -- --manifest /tmp/nexus-data/manifest.json --epochs 1 --seed 17
       - run: npm run build

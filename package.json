@@ -9,11 +9,30 @@
     "build": "next build",
     "start": "next start",
     "check": "tsc --noEmit",
-    "test": "tsx --test src/model/*.test.ts src/tokenizer/*.test.ts src/training/*.test.ts",
+    "test": "tsx --test src/model/*.test.ts src/tokenizer/*.test.ts src/training/*.test.ts src/evaluation/*.test.ts src/data/*.test.ts",
     "train": "tsx src/cli.ts train",
-    "generate": "tsx src/cli.ts generate"
+    "generate": "tsx src/cli.ts generate",
+    "train:context": "tsx src/cli/context.ts train",
+    "generate:context": "tsx src/cli/context.ts generate",
+    "evaluate": "tsx src/cli/evaluate.ts",
+    "prepare:dataset": "tsx src/cli/prepare-dataset.ts",
+    "evaluate:manifest": "tsx src/cli/evaluate-manifest.ts"
   },
-  "dependencies": { "next": "^15.5.0", "react": "^19.1.0", "react-dom": "^19.1.0" },
-  "devDependencies": { "@types/node": "^22.15.0", "@types/react": "^19.1.0", "@types/react-dom": "^19.1.0", "tsx": "^4.19.0", "typescript": "^5.8.0" },
-  "engines": { "node": ">=22" }
+  "dependencies": {
+    "next": "^15.5.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "@types/pg": "^8.15.5"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }

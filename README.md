@@ -4,7 +4,7 @@ Nexus is a TypeScript-first research project for building and progressively trai
 
 ## Current milestone
 
-The repository includes a small byte-level bigram neural language model, a responsive Next.js playground, and a Node.js inference endpoint that trains a tiny seed model in memory. This is an end-to-end runtime smoke test, not a capable conversational assistant.
+The repository includes two in-repository CPU language-model baselines: a byte-level bigram model and a context-window neural MLP with learned byte embeddings, a tanh hidden layer, and a softmax next-byte head. The current web endpoint still uses the tiny bigram baseline; the context MLP is a research/training milestone and is not yet promoted to serving.
 
 - Deterministic model initialization, UTF-8 byte tokenizer, and CPU training.
 - Versioned JSON checkpoints with checksum verification.
@@ -25,17 +25,26 @@ npm run build
 npm run dev
 npm run train -- --input data/corpus.txt --epochs 30 --learning-rate 0.08 --output artifacts/bigram-v1.json
 npm run generate -- --checkpoint artifacts/bigram-v1.json --prompt "Nexus " --tokens 160
+npm run train:context -- --input data/corpus.txt --epochs 30 --learning-rate 0.03 --output artifacts/context-mlp-v1.json
+npm run generate:context -- --checkpoint artifacts/context-mlp-v1.json --prompt "Nexus " --tokens 160
+npm run prepare:dataset -- --input data/corpus.txt --output artifacts/dataset-manifest.json --seed 17
+npm run evaluate:manifest -- --manifest artifacts/dataset-manifest.json --epochs 10 --seed 17
+npm run evaluate -- --input data/corpus.txt --epochs 20
 ```
 
 The web runtime's seed corpus is deliberately tiny and trained on cold start per server instance. Outputs are expected to be incoherent. It is only there to prove the application-to-model inference path without an external AI provider. Meaningful training requires a much larger licensed, curated dataset, evaluation splits, and measurable benchmarks. Never ingest private conversations or personal data without an explicit, appropriate data policy and consent.
 
 ## Design limits
 
-The current model predicts local byte-to-byte transitions. It has no long context, semantic understanding, transformer blocks, or useful general-purpose chat capability. Do not interpret the playground as a production AI assistant. The next engineering milestone is a more expressive model architecture with held-out evaluation and persistent, versioned checkpoints.
+The bigram baseline predicts one byte from the previous byte. The context MLP conditions on a fixed window of preceding bytes through learned embeddings and a hidden layer, and is trained with next-token cross-entropy. It is still a small experimental model—not a transformer, not a general-purpose assistant, and not evidence of semantic understanding. The seed corpus is far too small to produce useful language. The legacy evaluation CLI reports held-out negative log-likelihood and perplexity using an ordered 80/10/10 byte split. The manifest evaluation CLI instead trains both baselines only on train examples from the prepared manifest and reports validation/test metrics on their separate line-level splits. Each line is treated as an independent sequence. The dataset preparation CLI normalizes line-oriented text, removes exact normalized duplicates, hashes source and prepared content, and assigns stable per-example splits using a recorded seed. These evaluation protocols are distinct; compare model runs only when they use the same manifest, seed, and training settings. Both remain diagnostic on small corpora, not reliable estimates of generalization.
 
 ## Database
 
-Apply SQL files in `database/migrations` to the Neon PostgreSQL project. Checkpoints and large training artifacts should live in versioned file/object storage; PostgreSQL stores metadata and checksums rather than multi-megabyte weight arrays as ordinary rows.
+Apply SQL files in `database/migrations` to the Neon PostgreSQL project in order. Migration `0002_experiment_metrics.sql` adds dataset split manifests and initial/validation/test metrics to experiment metadata. These migrations are versioned but have not been applied to the live database. Set `DATABASE_URL` to enable optional training-run metadata persistence; without it, training runs locally without database access. Do not apply migrations to the live database until the schema change is explicitly approved; test migrations against a disposable Neon branch first. The current trainer records running/succeeded status and final loss using the existing `training_runs` table. Checkpoints and large training artifacts should live in versioned file/object storage; PostgreSQL stores metadata and checksums rather than multi-megabyte weight arrays as ordinary rows.
+
+## First production release
+
+See [`docs/production-readiness.md`](docs/production-readiness.md) for the release gates and current blockers. The checked-in seed corpus is a smoke-test fixture, not a production training corpus; production promotion requires a fixed held-out benchmark and a pinned, checksum-verified model artifact. The live endpoint remains unchanged until those gates pass.
 
 ## Workflow
 
