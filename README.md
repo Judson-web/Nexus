@@ -27,6 +27,7 @@ npm run train -- --input data/corpus.txt --epochs 30 --learning-rate 0.08 --outp
 npm run generate -- --checkpoint artifacts/bigram-v1.json --prompt "Nexus " --tokens 160
 npm run train:context -- --input data/corpus.txt --epochs 30 --learning-rate 0.03 --output artifacts/context-mlp-v1.json
 npm run generate:context -- --checkpoint artifacts/context-mlp-v1.json --prompt "Nexus " --tokens 160
+npm run prepare:dataset -- --input data/corpus.txt --output artifacts/dataset-manifest.json --seed 17
 npm run evaluate -- --input data/corpus.txt --epochs 20
 ```
 
@@ -34,11 +35,11 @@ The web runtime's seed corpus is deliberately tiny and trained on cold start per
 
 ## Design limits
 
-The bigram baseline predicts one byte from the previous byte. The context MLP conditions on a fixed window of preceding bytes through learned embeddings and a hidden layer, and is trained with next-token cross-entropy. It is still a small experimental model—not a transformer, not a general-purpose assistant, and not evidence of semantic understanding. The seed corpus is far too small to produce useful language. The evaluation CLI now reports held-out negative log-likelihood and perplexity for both model families using a deterministic ordered 80/10/10 byte split. This tiny corpus is only a smoke benchmark; it is not a reliable estimate of generalization. Next: use a larger licensed corpus with a fixed, deduplicated test set and persist run metadata/metrics in Neon.
+The bigram baseline predicts one byte from the previous byte. The context MLP conditions on a fixed window of preceding bytes through learned embeddings and a hidden layer, and is trained with next-token cross-entropy. It is still a small experimental model—not a transformer, not a general-purpose assistant, and not evidence of semantic understanding. The seed corpus is far too small to produce useful language. The evaluation CLI reports held-out negative log-likelihood and perplexity for both model families using a deterministic ordered 80/10/10 byte split. The dataset preparation CLI normalizes line-oriented text, removes exact normalized duplicates, hashes source and prepared content, and assigns stable per-example train/validation/test splits using a recorded seed. The generated manifest is reproducible and records split counts; use it to inspect corpus quality before training. The current evaluator remains a small-corpus diagnostic, not a reliable estimate of generalization.
 
 ## Database
 
-Apply SQL files in `database/migrations` to the Neon PostgreSQL project in order. Migration `0002_experiment_metrics.sql` adds dataset split manifests and initial/validation/test metrics to experiment metadata. These migrations are versioned but have not been applied to the live database. Set `DATABASE_URL` to enable optional training-run metadata persistence; without it, training runs locally without database access. The current trainer records running/succeeded status and final loss using the existing `training_runs` table. Checkpoints and large training artifacts should live in versioned file/object storage; PostgreSQL stores metadata and checksums rather than multi-megabyte weight arrays as ordinary rows.
+Apply SQL files in `database/migrations` to the Neon PostgreSQL project in order. Migration `0002_experiment_metrics.sql` adds dataset split manifests and initial/validation/test metrics to experiment metadata. These migrations are versioned but have not been applied to the live database. Set `DATABASE_URL` to enable optional training-run metadata persistence; without it, training runs locally without database access. Do not apply migrations to the live database until the schema change is explicitly approved; test migrations against a disposable Neon branch first. The current trainer records running/succeeded status and final loss using the existing `training_runs` table. Checkpoints and large training artifacts should live in versioned file/object storage; PostgreSQL stores metadata and checksums rather than multi-megabyte weight arrays as ordinary rows.
 
 ## Workflow
 
