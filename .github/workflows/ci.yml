@@ -14,7 +14,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,3 +25,4 @@ jobs:
       - run: npm test
       - run: npm run train -- --epochs 2 --output /tmp/nexus-smoke.json
       - run: npm run generate -- --checkpoint /tmp/nexus-smoke.json --prompt "Nexus" --tokens 12
+      - run: npm run build
