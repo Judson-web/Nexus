@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { ByteTokenizer } from "../tokenizer/byte-tokenizer.js";
 import { ContextModel, DEFAULT_CONTEXT_CONFIG } from "../model/context-model.js";
+import { finishTrainingRun, startTrainingRun } from "./experiment-store.js";
 
 export interface ContextTrainOptions {
   readonly inputPath: string;
@@ -17,6 +18,11 @@ export async function trainContextFromFile(options: ContextTrainOptions) {
   if (!text) throw new Error("Training corpus is empty.");
   const tokens = new ByteTokenizer().encode(text);
   const model = new ContextModel({ ...DEFAULT_CONTEXT_CONFIG, seed: options.seed });
+  const runId = await startTrainingRun({
+    modelFamily: "nexus-context-mlp",
+    seed: options.seed,
+    config: { ...model.config, epochs: options.epochs, learningRate: options.learningRate, inputPath: options.inputPath },
+  });
   const initialLoss = model.train(tokens, options.learningRate, 1).loss;
   const metrics = model.train(tokens, options.learningRate, options.epochs);
   const bytes = Buffer.from(JSON.stringify(model.toCheckpoint()), "utf8");
