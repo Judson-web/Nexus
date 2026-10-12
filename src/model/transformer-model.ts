@@ -238,7 +238,7 @@ export class TransformerModel {
    * single optimizer update. This reference implementation prioritizes correctness
    * and gradient inspectability over training throughput.
    */
-  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd"): TransformerMetrics {
+  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void): TransformerMetrics {
     this.validateTokens(tokens);
     checkInteger(epochs, "epochs", 1, 1000);
     if (tokens.length < 2) throw new Error("At least two tokens are required.");
@@ -263,6 +263,9 @@ export class TransformerModel {
         loss += result.loss;
         for (let p = 0; p < gradient.length; p++) {
           gradient[p] = gradient[p]! + result.gradients[p]!;
+        }
+        if (onProgress && (i === exampleCount || i % 16 === 0)) {
+          onProgress({ epoch: epoch + 1, epochs, targetsProcessed: i, totalTargets: exampleCount });
         }
       }
       // Clip the global L2 norm after averaging across examples. This keeps
