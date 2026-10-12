@@ -42,4 +42,17 @@ jobs:
           npm run evaluate:manifest -- --manifest /tmp/nexus-data/manifest.json --epochs 1 --seed 17
           npm run train:transformer:manifest -- --manifest /tmp/nexus-data/manifest.json --output /tmp/nexus-data/transformer.json --epochs 1 --context-size 2 --embedding-size 4 --heads 2 --feed-forward-size 4 --learning-rate 0.0001
           node -e "const fs=require('node:fs'); const p=JSON.parse(fs.readFileSync('/tmp/nexus-data/transformer.json.provenance.json','utf8')); if(p.dataset.validationAndTestUsedForTraining!==false || !p.checkpoint.sha256 || p.training.trainedExamples!==p.dataset.splitCounts.train || p.heldOutEvaluation.testUsedForModelSelection!==false || !Number.isFinite(p.heldOutEvaluation.validation.negativeLogLikelihood) || !Number.isFinite(p.heldOutEvaluation.test.perplexity)) process.exit(1)"
+      - name: Verify source-provided split preparation and leakage guard
+        run: |
+          mkdir -p /tmp/nexus-source-splits
+          printf 'training example one\ntraining example two\n' > /tmp/nexus-source-splits/train.txt
+          printf 'validation example one\n' > /tmp/nexus-source-splits/validation.txt
+          printf 'test example one\n' > /tmp/nexus-source-splits/test.txt
+          npm run prepare:dataset:source-splits -- --train /tmp/nexus-source-splits/train.txt --validation /tmp/nexus-source-splits/validation.txt --test /tmp/nexus-source-splits/test.txt --source-name "CI fixture" --source-url "https://example.invalid/dataset" --license "test-only" --attribution "CI fixture" --output /tmp/nexus-source-splits/manifest.json
+          node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('/tmp/nexus-source-splits/manifest.json','utf8')); if(m.splits.train!==2 || m.splits.validation!==1 || m.splits.test!==1 || m.sourceMetadata.splitPolicy!=='preserved-source-provided-splits' || m.sourceMetadata.license!=='test-only') process.exit(1)"
+          printf 'training example one\n' > /tmp/nexus-source-splits/validation-leak.txt
+          if npm run prepare:dataset:source-splits -- --train /tmp/nexus-source-splits/train.txt --validation /tmp/nexus-source-splits/validation-leak.txt --test /tmp/nexus-source-splits/test.txt --source-name "CI fixture" --source-url "https://example.invalid/dataset" --license "test-only" --attribution "CI fixture" --output /tmp/nexus-source-splits/should-not-exist.json; then
+            echo "Cross-split duplicate should have been rejected" >&2
+            exit 1
+          fi
       - run: npm run build
