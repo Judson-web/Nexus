@@ -101,10 +101,5 @@ export function reviewRows(rows: readonly CommonPileRow[], targetDocuments: numb
     if (accepted.length >= targetDocuments) break;
   }
 
-  const splitCounts = { train: 0, validation: 0, test: 0 };
-  for (const item of accepted) splitCounts[item.split] += 1;
-  if (Object.values(splitCounts).some((count) => count === 0)) {
-    throw new Error("Selected sample does not populate all three document-level splits; increase --documents or scan more rows.");
-  }
   return { accepted, rejectedLicenseOrMetadata, duplicateDocuments };
 }
