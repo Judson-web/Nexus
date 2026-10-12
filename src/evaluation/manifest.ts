@@ -17,7 +17,9 @@ export interface ManifestEvaluationOptions {
 interface Score {
   readonly examples: number;
   readonly tokens: number;
+  readonly utf8Bytes: number;
   readonly negativeLogLikelihood: number;
+  readonly bitsPerByte: number;
   readonly perplexity: number;
 }
 
@@ -82,7 +84,9 @@ function scoreExamples(
 ): Score {
   let total = 0;
   let tokens = 0;
+  let utf8Bytes = 0;
   for (const example of examples) {
+    utf8Bytes += Buffer.byteLength(example.text, "utf8");
     const encoded = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
     for (let i = 0; i < encoded.length; i += 1) {
       const context = encoded.slice(Math.max(0, i - contextSize), i);
@@ -93,7 +97,14 @@ function scoreExamples(
   }
   if (!tokens) throw new Error("Cannot score an empty dataset split.");
   const nll = total / tokens;
-  return { examples: examples.length, tokens, negativeLogLikelihood: nll, perplexity: Math.exp(Math.min(nll, 700)) };
+  return {
+    examples: examples.length,
+    tokens,
+    utf8Bytes,
+    negativeLogLikelihood: nll,
+    bitsPerByte: utf8Bytes === 0 ? 0 : total / (Math.LN2 * utf8Bytes),
+    perplexity: Math.exp(Math.min(nll, 700)),
+  };
 }
 
 export async function evaluateDatasetManifest(options: ManifestEvaluationOptions) {
