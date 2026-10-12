@@ -44,10 +44,9 @@ function checkInteger(value: number, name: string, min: number, max: number): vo
  * projection. This is a single-block CPU reference implementation, not a
  * production-scale model.
  *
- * Training uses simultaneous perturbation stochastic approximation (SPSA) to
- * estimate gradients over the complete parameter vector. It is deliberately
- * simple and derivative-free; it is a research stepping stone, not a substitute
- * for the exact backpropagation implementation needed for larger models.
+ * Training uses exact reverse-mode gradients from the scalar autodiff reference
+ * implementation. The current graph-based path prioritizes inspectability and
+ * correctness over throughput; it is intended for small CPU research runs.
  */
 export class TransformerModel {
   public readonly config: TransformerConfig;
