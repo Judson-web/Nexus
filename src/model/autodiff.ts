@@ -8,9 +8,11 @@
  */
 export class Value {
   public grad = 0;
-  private readonly parents: readonly { value: Value; derivative: number }[];
+  // A null value denotes a numeric constant: it contributes to the forward
+  // result and local derivative, but it is not a differentiable graph node.
+  private readonly parents: readonly { value: Value | null; derivative: number }[];
 
-  private constructor(public readonly data: number, parents: readonly { value: Value; derivative: number }[] = []) {
+  private constructor(public readonly data: number, parents: readonly { value: Value | null; derivative: number }[] = []) {
     if (!Number.isFinite(data)) throw new RangeError("Autodiff values must be finite.");
     this.parents = parents;
   }
@@ -20,35 +22,48 @@ export class Value {
   }
 
   public add(other: Value | number): Value {
-    const rhs = asValue(other);
-    return new Value(this.data + rhs.data, [
+    if (typeof other === "number") {
+      assertFiniteOperand(other);
+      return new Value(this.data + other, [{ value: this, derivative: 1 }]);
+    }
+    return new Value(this.data + other.data, [
       { value: this, derivative: 1 },
-      { value: rhs, derivative: 1 },
+      { value: other, derivative: 1 },
     ]);
   }
 
   public sub(other: Value | number): Value {
-    const rhs = asValue(other);
-    return new Value(this.data - rhs.data, [
+    if (typeof other === "number") {
+      assertFiniteOperand(other);
+      return new Value(this.data - other, [{ value: this, derivative: 1 }]);
+    }
+    return new Value(this.data - other.data, [
       { value: this, derivative: 1 },
-      { value: rhs, derivative: -1 },
+      { value: other, derivative: -1 },
     ]);
   }
 
   public mul(other: Value | number): Value {
-    const rhs = asValue(other);
-    return new Value(this.data * rhs.data, [
-      { value: this, derivative: rhs.data },
-      { value: rhs, derivative: this.data },
+    if (typeof other === "number") {
+      assertFiniteOperand(other);
+      return new Value(this.data * other, [{ value: this, derivative: other }]);
+    }
+    return new Value(this.data * other.data, [
+      { value: this, derivative: other.data },
+      { value: other, derivative: this.data },
     ]);
   }
 
   public div(other: Value | number): Value {
-    const rhs = asValue(other);
-    if (rhs.data === 0) throw new RangeError("Division by zero in autodiff graph.");
-    return new Value(this.data / rhs.data, [
-      { value: this, derivative: 1 / rhs.data },
-      { value: rhs, derivative: -this.data / (rhs.data * rhs.data) },
+    if (typeof other === "number") {
+      assertFiniteOperand(other);
+      if (other === 0) throw new RangeError("Division by zero in autodiff graph.");
+      return new Value(this.data / other, [{ value: this, derivative: 1 / other }]);
+    }
+    if (other.data === 0) throw new RangeError("Division by zero in autodiff graph.");
+    return new Value(this.data / other.data, [
+      { value: this, derivative: 1 / other.data },
+      { value: other, derivative: -this.data / (other.data * other.data) },
     ]);
   }
 
@@ -99,7 +114,9 @@ export class Value {
       stack.push({ node: entry.node, expanded: true });
       for (let i = entry.node.parents.length - 1; i >= 0; i--) {
         const parent = entry.node.parents[i]!;
-        if (!visited.has(parent.value)) stack.push({ node: parent.value, expanded: false });
+        if (parent.value !== null && !visited.has(parent.value)) {
+          stack.push({ node: parent.value, expanded: false });
+        }
       }
     }
     for (const node of order) node.grad = 0;
@@ -107,7 +124,7 @@ export class Value {
     for (let i = order.length - 1; i >= 0; i--) {
       const node = order[i]!;
       for (const parent of node.parents) {
-        parent.value.grad += node.grad * parent.derivative;
+        if (parent.value !== null) parent.value.grad += node.grad * parent.derivative;
       }
     }
     if (order.some((node) => !Number.isFinite(node.grad))) {
@@ -116,8 +133,6 @@ export class Value {
   }
 }
 
-function asValue(value: Value | number): Value {
-  if (value instanceof Value) return value;
+function assertFiniteOperand(value: number): void {
   if (!Number.isFinite(value)) throw new RangeError("Autodiff operands must be finite.");
-  return Value.of(value);
 }
