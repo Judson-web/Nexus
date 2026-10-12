@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { BigramModel } from "../../../src/model/bigram-model.js";
 import { loadVerifiedTransformerArtifact } from "../../../src/model/verified-transformer-artifact.js";
 import type { TransformerModel } from "../../../src/model/transformer-model.js";
 import { ByteTokenizer } from "../../../src/tokenizer/byte-tokenizer.js";
@@ -8,26 +7,8 @@ export const runtime = "nodejs";
 export const maxDuration = 10;
 
 const MAX_BODY_BYTES = 4096;
-const CORPUS = [
-  "Nexus is an independent research project building a language model from the ground up.",
-  "A language model learns patterns from examples and predicts the next token.",
-  "Reliable experiments use curated data, explicit configurations, and repeatable evaluation.",
-  "Good engineering favors small verified steps over unsupported claims.",
-  "TypeScript helps keep training code explicit, testable, and maintainable.",
-  "Independent AI research requires careful data provenance, measurement, and iteration.",
-].join("\n");
-
-let cachedModel: BigramModel | undefined;
 let cachedTransformer: Promise<{ model: TransformerModel; sha256: string }> | undefined;
 const tokenizer = new ByteTokenizer();
-
-function getBaselineModel(): BigramModel {
-  if (cachedModel) return cachedModel;
-  const model = new BigramModel({ vocabSize: 257, seed: 17, initializationScale: 0.01 });
-  model.train(tokenizer.encode(CORPUS), 0.08, 8);
-  cachedModel = model;
-  return model;
-}
 
 async function getConfiguredTransformer(): Promise<{ model: TransformerModel; sha256: string } | undefined> {
   const checkpointPath = process.env.NEXUS_TRANSFORMER_CHECKPOINT?.trim();
@@ -108,12 +89,10 @@ export async function POST(request: Request) {
         note: "Experimental self-trained Transformer. Checkpoint checksum verified at load; output quality depends on training data and evaluation.",
       }, { headers: { "Cache-Control": "no-store" } });
     }
-    const generated = getBaselineModel().generate(tokenizer.encode(prompt, false), maxTokens);
     return NextResponse.json({
-      text: tokenizer.decode(generated).slice(0, 1200),
-      model: "Nexus Bigram v0.1",
-      note: "Experimental baseline trained in-memory on a tiny seed corpus. Outputs are expected to be incoherent; configure NEXUS_TRANSFORMER_CHECKPOINT with a trained checkpoint and matching .sha256 sidecar to use the Transformer.",
-    }, { headers: { "Cache-Control": "no-store" } });
+      error: "No verified Transformer checkpoint is configured. Inference is disabled until a trained checkpoint and matching SHA-256 sidecar are provisioned.",
+      code: "MODEL_NOT_CONFIGURED",
+    }, { status: 503, headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ error: "The model could not generate a response." }, { status: 500 });
   }
