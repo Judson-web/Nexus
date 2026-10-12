@@ -5,6 +5,13 @@ import { compareTransformerProfileReports } from "./compare-transformer-profiles
 function report(overrides: Record<string, unknown> = {}) {
   return {
     dataset: { sourceSha256: "a".repeat(64), tokenCount: 120 },
+    runtime: {
+      nodeVersion: "v22.15.0",
+      platform: "linux",
+      architecture: "x64",
+      cpuModel: "Test CPU",
+      logicalCpuCount: 8,
+    },
     model: {
       family: "nexus-transformer",
       config: { contextSize: 3, embeddingSize: 4, seed: 101 },
@@ -28,9 +35,25 @@ test("compares compatible reports and calculates signed changes", () => {
     profile: { totalDurationMs: 80, meanEpochDurationMs: 20, meanExamplesPerSecond: 50, medianFinalLoss: 1.8 },
   }));
   assert.equal(result.compatible, true);
+  assert.equal(result.runtime.cpuModel, "Test CPU");
   assert.equal(result.metrics.totalDurationMs.percentChange, -20);
   assert.equal(result.metrics.meanExamplesPerSecond.percentChange, 25);
   assert.ok(Math.abs(result.metrics.medianFinalLoss.percentChange! - (-9.999999999999998)) < 1e-9);
+});
+
+test("refuses comparisons across different runtime environments", () => {
+  assert.throws(() => compareTransformerProfileReports(report(), report({
+    runtime: { ...report().runtime as object, nodeVersion: "v24.0.0" },
+  })), /runtime environment differs/i);
+});
+
+test("rejects malformed runtime metadata", () => {
+  assert.throws(() => compareTransformerProfileReports(report(), report({
+    runtime: { ...report().runtime as object, logicalCpuCount: 0 },
+  })), /positive integer/i);
+  assert.throws(() => compareTransformerProfileReports(report(), report({
+    runtime: { ...report().runtime as object, cpuModel: "" },
+  })), /non-empty string/i);
 });
 
 test("refuses comparisons across different datasets", () => {
