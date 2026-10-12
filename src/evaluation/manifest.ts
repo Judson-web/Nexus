@@ -21,7 +21,7 @@ interface Score {
   readonly perplexity: number;
 }
 
-function validateManifest(value: unknown): DatasetManifest {
+export function validateDatasetManifest(value: unknown): DatasetManifest {
   if (!value || typeof value !== "object") throw new Error("Dataset manifest must be a JSON object.");
   const manifest = value as Partial<DatasetManifest>;
   const isSha256 = (digest: unknown): digest is string =>
@@ -105,7 +105,7 @@ export async function evaluateDatasetManifest(options: ManifestEvaluationOptions
     throw new TypeError("includeTransformer must be a boolean.");
   }
   const raw = await readFile(options.manifestPath, "utf8");
-  const manifest = validateManifest(JSON.parse(raw) as unknown);
+  const manifest = validateDatasetManifest(JSON.parse(raw) as unknown);
   const train = manifest.examples.filter((example) => example.split === "train");
   const validation = manifest.examples.filter((example) => example.split === "validation");
   const test = manifest.examples.filter((example) => example.split === "test");

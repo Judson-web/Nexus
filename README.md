@@ -29,8 +29,11 @@ npm run train:context -- --input data/corpus.txt --epochs 30 --learning-rate 0.0
 npm run generate:context -- --checkpoint artifacts/context-mlp-v1.json --prompt "Nexus " --tokens 160
 npm run prepare:dataset -- --input data/corpus.txt --output artifacts/dataset-manifest.json --seed 17
 npm run evaluate:manifest -- --manifest artifacts/dataset-manifest.json --epochs 10 --seed 17
+npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --epochs 1 --output artifacts/transformer-manifest-v1.json
 npm run evaluate -- --input data/corpus.txt --epochs 20
 ```
+
+Manifest-driven Transformer training uses only examples marked `train`. It writes a normal Transformer checkpoint plus a `.sha256` checksum file and `.provenance.json` sidecar recording the exact manifest hash, source/prepared hashes, split counts, training-example IDs, model configuration, seed, learning rate, epochs, and training loss. Validation and test examples are never used for gradient updates. The training command is CPU-expensive; start with one epoch and a small model configuration. Example: `npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --epochs 1 --context-size 3 --embedding-size 4 --heads 2 --feed-forward-size 8 --learning-rate 0.0001 --output artifacts/transformer-v1.json`. The checkpoint remains compatible with `npm run generate:transformer`.
 
 The web runtime's seed corpus is deliberately tiny and trained on cold start per server instance. Outputs are expected to be incoherent. It is only there to prove the application-to-model inference path without an external AI provider. Meaningful training requires a much larger licensed, curated dataset, evaluation splits, and measurable benchmarks. Never ingest private conversations or personal data without an explicit, appropriate data policy and consent.
 
