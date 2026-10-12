@@ -32,7 +32,7 @@ test("document split is deterministic and independent of row order", () => {
   assert.equal(splitForSourceId("2401.00001"), splitForSourceId("2401.00001"));
   assert.throws(() => splitForSourceId("  "), /must not be empty/i);
   const ids = Array.from({ length: 300 }, (_, i) => `2401.${String(i).padStart(5, "0")}`);
-  const rows = ids.map((id) => row(id));
+  const rows = ids.map((id) => row(id, `Unique abstract for ${id}: this scientific record describes a research method, an experimental observation, and a reproducible finding in its field.`));
   const first = reviewRows(rows, 200).accepted.map((item) => [item.id, item.split]);
   const second = reviewRows([...rows].reverse(), 200).accepted.map((item) => [item.id, item.split]);
   assert.deepEqual(new Map(first), new Map(second));
