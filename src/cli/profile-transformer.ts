@@ -12,7 +12,7 @@ for (let index = 0; index < args.length; index += 1) {
   index += 1;
 }
 
-const allowed = new Set(["input", "epochs", "repeats", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "seed", "target-stride"]);
+const allowed = new Set(["input", "epochs", "repeats", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "seed", "target-stride", "optimizer"]);
 for (const key of options.keys()) {
   if (!allowed.has(key)) throw new Error(`Unknown option: --${key}`);
 }
@@ -29,6 +29,7 @@ try {
     epochs: numberOption("epochs", 2),
     repeats: numberOption("repeats", 1),
     targetStride: numberOption("target-stride", 1),
+    optimizer: options.get("optimizer") === undefined ? "sgd" : options.get("optimizer") as "sgd" | "adam",
     learningRate: numberOption("learning-rate", 0.0001),
     config: {
       contextSize: numberOption("context-size", 3),
