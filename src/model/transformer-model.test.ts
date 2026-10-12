@@ -25,6 +25,16 @@ test("Transformer backpropagation updates parameters and returns finite metrics"
   assert.ok(after.some((value, index) => value !== before[index]));
 });
 
+test("Transformer reports bounded token-level training progress", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 53 };
+  const progress: Array<{ epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }> = [];
+  const tokens = [1, 2, 1, 2, 1, 2, 1, 2, 1, 2];
+  new TransformerModel(tinyConfig).train(tokens, 0.001, 2, 1, "adam", (entry) => progress.push(entry));
+  assert.ok(progress.length > 0);
+  assert.deepEqual(progress.at(-1), { epoch: 2, epochs: 2, targetsProcessed: tokens.length - 1, totalTargets: tokens.length - 1 });
+  assert.ok(progress.every((entry) => entry.targetsProcessed > 0 && entry.targetsProcessed <= entry.totalTargets));
+});
+
 test("Transformer checkpoint round-trips and rejects malformed weights", () => {
   const model = new TransformerModel(config);
   const restored = TransformerModel.fromCheckpoint(model.toCheckpoint());
