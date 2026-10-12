@@ -32,6 +32,8 @@ jobs:
       - run: npm run evaluate -- --epochs 2
       - name: Verify held-out Transformer evaluation
         run: npm run evaluate:transformer -- --epochs 1 --context-size 3 --embedding-size 4 --heads 2 --feed-forward-size 8 --learning-rate 0.0001
+      - name: Verify Transformer training profiler
+        run: npm run profile:transformer -- --epochs 1 --context-size 2 --embedding-size 4 --heads 2 --feed-forward-size 4 --learning-rate 0.0001
       - name: Verify manifest-driven evaluation
         run: |
           mkdir -p /tmp/nexus-data
