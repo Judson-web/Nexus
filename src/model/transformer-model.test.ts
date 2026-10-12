@@ -73,3 +73,16 @@ test("Transformer leaves gradients unclipped when below the configured threshold
   const metrics = new TransformerModel(tinyConfig).train([1, 2, 1, 2, 1], 0.001, 1, 1e6);
   assert.equal(metrics.gradientScale, 1);
 });
+
+test("Transformer Adam optimizer trains deterministically and validates its name", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 43 };
+  const tokens = [1, 2, 1, 2, 1, 2, 1, 2];
+  const first = new TransformerModel(tinyConfig);
+  const second = new TransformerModel(tinyConfig);
+  const metrics = first.train(tokens, 0.001, 3, 1, "adam");
+  second.train(tokens, 0.001, 3, 1, "adam");
+  assert.ok(Number.isFinite(metrics.loss));
+  assert.deepEqual(first.toCheckpoint().weights, second.toCheckpoint().weights);
+  assert.ok(first.toCheckpoint().weights.some((weight, i) => weight !== new TransformerModel(tinyConfig).toCheckpoint().weights[i]));
+  assert.throws(() => new TransformerModel(tinyConfig).train(tokens, 0.001, 1, 1, "bad" as "adam"), /optimizer/i);
+});

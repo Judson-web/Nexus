@@ -1,0 +1,78 @@
+name: Nexus bounded corpus training
+
+on:
+  workflow_dispatch:
+    inputs:
+      documents:
+        description: "Number of eligible CC0 abstracts to acquire (3-1000)"
+        required: true
+        default: "200"
+        type: string
+      max_rows:
+        description: "Maximum dataset-viewer rows to scan (100-20000)"
+        required: true
+        default: "5000"
+        type: string
+      epochs:
+        description: "Training epochs per example (start small)"
+        required: true
+        default: "1"
+        type: string
+      seed:
+        description: "Deterministic model seed"
+        required: true
+        default: "17"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  acquire-train-evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - name: Acquire bounded, provenance-checked CC0 corpus
+        run: npm run acquire:common-pile -- --documents "${{ inputs.documents }}" --max-rows "${{ inputs.max_rows }}" --output artifacts/common-pile-arxiv-abstracts
+      - name: Build split-preserving training manifest
+        run: npm run prepare:dataset:source-splits -- --train artifacts/common-pile-arxiv-abstracts/train.txt --validation artifacts/common-pile-arxiv-abstracts/validation.txt --test artifacts/common-pile-arxiv-abstracts/test.txt --source-name "Common Pile arXiv abstracts" --source-url "https://huggingface.co/datasets/common-pile/arxiv_abstracts" --license "CC0 (record-level metadata checked; see acquisition manifest)" --attribution "Common Pile arXiv abstracts; source URLs and authors in acquisition manifest" --output artifacts/dataset-manifest.json
+      - name: Train small in-house Transformer with Adam and score held-out splits
+        run: npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output artifacts/transformer-common-pile.json --epochs "${{ inputs.epochs }}" --seed "${{ inputs.seed }}" --optimizer adam --context-size 3 --embedding-size 4 --heads 2 --feed-forward-size 8 --learning-rate 0.0001
+      - name: Verify checkpoint provenance and held-out evaluation
+        run: |
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { createHash } from "node:crypto";
+            const manifest = JSON.parse(readFileSync("artifacts/dataset-manifest.json", "utf8"));
+            const provenance = JSON.parse(readFileSync("artifacts/transformer-common-pile.json.provenance.json", "utf8"));
+            const checkpoint = readFileSync("artifacts/transformer-common-pile.json");
+            const digest = createHash("sha256").update(checkpoint).digest("hex");
+            if (provenance.checkpoint.sha256 !== digest) throw new Error("Checkpoint SHA-256 mismatch");
+            if (provenance.dataset.validationAndTestUsedForTraining !== false) throw new Error("Held-out leakage flag invalid");
+            if (provenance.training.optimizer !== "adam") throw new Error("Unexpected optimizer");
+            if (provenance.training.trainedExamples !== manifest.splits.train) throw new Error("Training example count mismatch");
+            for (const split of ["validation", "test"]) {
+              const score = provenance.heldOutEvaluation[split];
+              if (!Number.isFinite(score.negativeLogLikelihood) || !Number.isFinite(score.perplexity) || score.tokens < 1) throw new Error("Invalid held-out score: " + split);
+            }
+            console.log(JSON.stringify({ acceptedExamples: manifest.acceptedExamples, splits: manifest.splits, trainedExamples: provenance.training.trainedExamples, optimizer: provenance.training.optimizer, validation: provenance.heldOutEvaluation.validation, test: provenance.heldOutEvaluation.test, checkpointSha256: digest }, null, 2));
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-common-pile-transformer-${{ github.run_id }}
+          path: |
+            artifacts/common-pile-arxiv-abstracts/
+            artifacts/dataset-manifest.json
+            artifacts/transformer-common-pile.json
+            artifacts/transformer-common-pile.json.sha256
+            artifacts/transformer-common-pile.json.provenance.json
+          if-no-files-found: error
+          retention-days: 14
