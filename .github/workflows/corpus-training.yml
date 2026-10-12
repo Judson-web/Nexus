@@ -84,8 +84,10 @@ jobs:
           path: |
             artifacts/common-pile-arxiv-abstracts/
             artifacts/dataset-manifest.json
-            artifacts/transformer-common-pile.json
-            artifacts/transformer-common-pile.json.sha256
-            artifacts/transformer-common-pile.json.provenance.json
+            artifacts/transformer-lr-*.json
+            artifacts/transformer-lr-*.json.sha256
+            artifacts/transformer-lr-*.json.provenance.json
+            artifacts/tokenizer-audit.json
+            artifacts/experiment-results.json
           if-no-files-found: error
           retention-days: 14
