@@ -85,8 +85,8 @@ jobs:
           checkpoint="artifacts/transformer-lr-${best_rate}.json"
           test -s "$checkpoint"
           mkdir -p artifacts/generation-samples
-          npm run generate:transformer -- --checkpoint "$checkpoint" --prompt "The universe is" --tokens 120 > artifacts/generation-samples/universe.txt
-          npm run generate:transformer -- --checkpoint "$checkpoint" --prompt "In this paper, we present" --tokens 120 > artifacts/generation-samples/research.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "The universe is" --tokens 120 > artifacts/generation-samples/universe.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "In this paper, we present" --tokens 120 > artifacts/generation-samples/research.txt
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
             const prompts = ["The universe is", "In this paper, we present"];
