@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { dirname, join } from "node:path";
 import {
   COMMON_PILE_ARXIV_ABSTRACTS,
@@ -41,12 +42,28 @@ function integerOption(options: Map<string, string>, name: string, fallback: num
   return value;
 }
 
+async function fetchWithRetry(url: URL | string, timeoutMs: number): Promise<Response> {
+  const attempts = 3;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: { accept: "application/json", "user-agent": "Nexus-Corpus-Acquisition/1.0" },
+        signal: AbortSignal.timeout(timeoutMs),
+        cache: "no-store",
+      });
+      if (response.ok || (response.status < 500 && response.status !== 429)) return response;
+      lastError = new Error(`Upstream returned HTTP ${response.status}.`);
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < attempts) await delay(1000 * 2 ** (attempt - 1));
+  }
+  throw new Error(`Upstream request failed after ${attempts} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+
 async function verifyPinnedRevision(timeoutMs: number): Promise<void> {
-  const response = await fetch(`https://huggingface.co/api/datasets/${COMMON_PILE_ARXIV_ABSTRACTS.dataset}`, {
-    headers: { accept: "application/json", "user-agent": "Nexus-Corpus-Acquisition/1.0" },
-    signal: AbortSignal.timeout(timeoutMs),
-    cache: "no-store",
-  });
+  const response = await fetchWithRetry(`https://huggingface.co/api/datasets/${COMMON_PILE_ARXIV_ABSTRACTS.dataset}`, timeoutMs);
   if (!response.ok) throw new Error(`Could not verify upstream dataset revision (HTTP ${response.status}); refusing unpinned acquisition.`);
   const metadata = await response.json() as { readonly sha?: unknown };
   if (metadata.sha !== COMMON_PILE_ARXIV_ABSTRACTS.revision) {
@@ -59,12 +76,9 @@ async function fetchPage(offset: number, length: number, timeoutMs: number): Pro
   url.searchParams.set("dataset", COMMON_PILE_ARXIV_ABSTRACTS.dataset);
   url.searchParams.set("config", COMMON_PILE_ARXIV_ABSTRACTS.config);
   url.searchParams.set("split", COMMON_PILE_ARXIV_ABSTRACTS.split);
-    url.searchParams.set("offset", String(offset));
+  url.searchParams.set("offset", String(offset));
   url.searchParams.set("length", String(length));
-  const response = await fetch(url, {
-    headers: { accept: "application/json", "user-agent": "Nexus-Corpus-Acquisition/1.0" },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  const response = await fetchWithRetry(url, timeoutMs);
   if (!response.ok) {
     throw new Error(`Hugging Face dataset viewer returned HTTP ${response.status} at offset ${offset}; no data was written.`);
   }
@@ -85,7 +99,7 @@ async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const targetDocuments = integerOption(options, "documents", 200, 3, 1000);
   const maxRows = integerOption(options, "max-rows", 5000, 100, 20000);
-  const timeoutMs = integerOption(options, "timeout-ms", 20000, 1000, 120000);
+  const timeoutMs = integerOption(options, "timeout-ms", 120000, 1000, 120000);
   const outputDirectory = options.get("output") ?? "artifacts/common-pile-arxiv-abstracts";
   const rows: CommonPileRow[] = [];
   let offset = 0;
