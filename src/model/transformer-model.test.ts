@@ -111,3 +111,16 @@ test("Transformer generation resumes normal EOS sampling after the minimum conti
   const generated = model.generate([84], 3, () => 0.999999, 1);
   assert.equal(generated.length, 4);
 });
+
+
+test("Transformer supports deterministic strided target sampling and reports sampled target counts", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 71 };
+  const tokens = [1, 2, 3, 4, 5, 6, 7, 1, 2, 3];
+  const progress: Array<{ epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }> = [];
+  const model = new TransformerModel(tinyConfig);
+  const metrics = model.train(tokens, 0.001, 1, 1, "adam", (entry) => progress.push(entry), 2);
+  assert.equal(metrics.examples, 5);
+  assert.ok(Number.isFinite(metrics.loss));
+  assert.deepEqual(progress.at(-1), { epoch: 1, epochs: 1, targetsProcessed: 5, totalTargets: 5 });
+  assert.throws(() => new TransformerModel(tinyConfig).train(tokens, 0.001, 1, 1, "adam", undefined, 0), /targetStride/);
+});

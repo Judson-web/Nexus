@@ -238,7 +238,7 @@ export class TransformerModel {
    * single optimizer update. This reference implementation prioritizes correctness
    * and gradient inspectability over training throughput.
    */
-  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void): TransformerMetrics {
+  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void, targetStride = 1): TransformerMetrics {
     this.validateTokens(tokens);
     checkInteger(epochs, "epochs", 1, 1000);
     if (tokens.length < 2) throw new Error("At least two tokens are required.");
@@ -249,7 +249,11 @@ export class TransformerModel {
       throw new RangeError("maxGradientNorm must be finite and positive.");
     }
     if (optimizer !== "sgd" && optimizer !== "adam") throw new RangeError("optimizer must be sgd or adam.");
-    const exampleCount = tokens.length - 1;
+    checkInteger(targetStride, "targetStride", 1, 32);
+    const targetIndices: number[] = [];
+    for (let i = 1; i < tokens.length; i += targetStride) targetIndices.push(i);
+    if (targetIndices.at(-1) !== tokens.length - 1) targetIndices.push(tokens.length - 1);
+    const exampleCount = targetIndices.length;
     let gradientNorm = 0;
     let gradientScale = 1;
     const gradient = new Float64Array(this.weights.length);
@@ -257,15 +261,16 @@ export class TransformerModel {
     for (let epoch = 0; epoch < epochs; epoch++) {
       gradient.fill(0);
       loss = 0;
-      for (let i = 1; i < tokens.length; i++) {
+      for (let targetIndex = 0; targetIndex < targetIndices.length; targetIndex++) {
+        const i = targetIndices[targetIndex]!;
         const context = tokens.slice(Math.max(0, i - this.config.contextSize), i);
         const result = transformerLossAndGradients(this.config, this.weights, context, tokens[i]!);
         loss += result.loss;
         for (let p = 0; p < gradient.length; p++) {
           gradient[p] = gradient[p]! + result.gradients[p]!;
         }
-        if (onProgress && (i === exampleCount || i % 16 === 0)) {
-          onProgress({ epoch: epoch + 1, epochs, targetsProcessed: i, totalTargets: exampleCount });
+        if (onProgress && (targetIndex === exampleCount - 1 || (targetIndex + 1) % 16 === 0)) {
+          onProgress({ epoch: epoch + 1, epochs, targetsProcessed: targetIndex + 1, totalTargets: exampleCount });
         }
       }
       // Clip the global L2 norm after averaging across examples. This keeps
@@ -304,7 +309,7 @@ export class TransformerModel {
     }
     // Report the loss after the final epoch, not the pre-update objective.
     loss = 0;
-    for (let i = 1; i < tokens.length; i++) {
+    for (const i of targetIndices) {
       const probabilities = this.forward(tokens.slice(Math.max(0, i - this.config.contextSize), i));
       loss -= Math.log(Math.max(Number.MIN_VALUE, probabilities[tokens[i]!]!));
     }
