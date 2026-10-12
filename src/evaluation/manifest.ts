@@ -3,12 +3,15 @@ import { createHash } from "node:crypto";
 import type { DatasetManifest, PreparedExample, DatasetSplit } from "../data/dataset.js";
 import { BigramModel } from "../model/bigram-model.js";
 import { ContextModel, DEFAULT_CONTEXT_CONFIG } from "../model/context-model.js";
+import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel } from "../model/transformer-model.js";
 import { ByteTokenizer, EOS_TOKEN_ID } from "../tokenizer/byte-tokenizer.js";
 
 export interface ManifestEvaluationOptions {
   readonly manifestPath: string;
   readonly epochs?: number;
   readonly seed?: number;
+  /** Include the CPU Transformer research model; it is slower than the baselines. */
+  readonly includeTransformer?: boolean;
 }
 
 interface Score {
@@ -73,7 +76,7 @@ function validateManifest(value: unknown): DatasetManifest {
 
 function scoreExamples(
   examples: readonly PreparedExample[],
-  probabilities: (context: number[]) => Float64Array,
+  probabilities: (context: number[]) => ArrayLike<number>,
   contextSize: number,
   tokenizer: ByteTokenizer,
 ): Score {
@@ -98,6 +101,9 @@ export async function evaluateDatasetManifest(options: ManifestEvaluationOptions
   const seed = options.seed ?? 17;
   if (!Number.isInteger(epochs) || epochs < 1 || epochs > 10000) throw new RangeError("epochs must be between 1 and 10000.");
   if (!Number.isSafeInteger(seed)) throw new RangeError("seed must be a safe integer.");
+  if (options.includeTransformer !== undefined && typeof options.includeTransformer !== "boolean") {
+    throw new TypeError("includeTransformer must be a boolean.");
+  }
   const raw = await readFile(options.manifestPath, "utf8");
   const manifest = validateManifest(JSON.parse(raw) as unknown);
   const train = manifest.examples.filter((example) => example.split === "train");
@@ -113,11 +119,58 @@ export async function evaluateDatasetManifest(options: ManifestEvaluationOptions
     context.train(tokens, 0.03, epochs);
   }
 
-  const evaluate = (modelFamily: string, probabilities: (context: number[]) => Float64Array, contextSize: number) => ({
-    modelFamily,
-    validation: scoreExamples(validation, probabilities, contextSize, tokenizer),
-    test: scoreExamples(test, probabilities, contextSize, tokenizer),
-  });
+  const evaluations = [
+    {
+      ...evaluate("nexus-bigram", (ctx) => bigram.probabilities(ctx.length ? ctx[ctx.length - 1]! : 0), 1),
+      training: { epochsPerExample: epochs, learningRate: 0.08 },
+    },
+    {
+      ...evaluate("nexus-context-mlp", (ctx) => context.probabilities(ctx), context.config.contextSize),
+      training: { epochsPerExample: epochs, learningRate: 0.03 },
+    },
+  ];
+
+  let transformerTraining: { epochsPerExample: number; learningRate: number; trainedExamples: number; contextSize: number; embeddingSize: number; headCount: number; feedForwardSize: number } | undefined;
+  if (options.includeTransformer) {
+    // Deliberately small CPU research configuration. Keep this opt-in because
+    // exact reverse-mode autodiff is much slower than the two baseline models.
+    const config = {
+      ...DEFAULT_TRANSFORMER_CONFIG,
+      vocabSize: 257,
+      contextSize: 3,
+      embeddingSize: 4,
+      headCount: 2,
+      feedForwardSize: 8,
+      seed,
+    };
+    const transformer = new TransformerModel(config);
+    const learningRate = 0.0001;
+    for (const example of train) {
+      transformer.train([...tokenizer.encode(example.text, false), EOS_TOKEN_ID], learningRate, epochs);
+    }
+    evaluations.push({
+      ...evaluate("nexus-transformer", (ctx) => transformer.probabilities(ctx), config.contextSize),
+      training: { epochsPerExample: epochs, learningRate },
+    });
+    transformerTraining = {
+      epochsPerExample: epochs,
+      learningRate,
+      trainedExamples: train.length,
+      contextSize: config.contextSize,
+      embeddingSize: config.embeddingSize,
+      headCount: config.headCount,
+      feedForwardSize: config.feedForwardSize,
+    };
+  }
+
+  function evaluate(modelFamily: string, probabilities: (ctx: number[]) => ArrayLike<number>, contextSize: number) {
+    return {
+      modelFamily,
+      validation: scoreExamples(validation, probabilities, contextSize, tokenizer),
+      test: scoreExamples(test, probabilities, contextSize, tokenizer),
+    };
+  }
+
   return {
     dataset: {
       manifestSha256: createHash("sha256").update(raw, "utf8").digest("hex"),
@@ -126,12 +179,15 @@ export async function evaluateDatasetManifest(options: ManifestEvaluationOptions
       splitSeed: manifest.splitSeed,
       counts: manifest.splits,
     },
-    training: { epochsPerExample: epochs, seed, trainedExamples: train.length, leakagePolicy: "Each line is an independent sequence; validation/test examples are never used for gradient updates." },
-    evaluations: [
-      evaluate("nexus-bigram", (ctx) => bigram.probabilities(ctx.length ? ctx[ctx.length - 1]! : 0), 1),
-      evaluate("nexus-context-mlp", (ctx) => context.probabilities(ctx), context.config.contextSize),
-    ],
-    warning: "This evaluates the exact content-hash splits in the manifest, separately from the legacy ordered byte-split evaluator. Small corpora and tiny models do not establish general language ability; do not tune against the test split.",
+    training: {
+      epochsPerExample: epochs,
+      seed,
+      trainedExamples: train.length,
+      leakagePolicy: "Each line is an independent sequence; validation/test examples are never used for gradient updates.",
+      ...(transformerTraining ? { transformer: transformerTraining } : {}),
+    },
+    evaluations,
+    warning: "This evaluates the exact content-hash splits in the manifest, separately from the legacy ordered byte-split evaluator. Small corpora and tiny models do not establish general language ability; do not tune against the test split. The optional Transformer uses a deliberately small CPU configuration and exact autodiff, so evaluation can be slow.",
   };
 }
 
