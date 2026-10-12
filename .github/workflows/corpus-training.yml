@@ -30,7 +30,7 @@ permissions:
 jobs:
   acquire-train-evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -52,7 +52,7 @@ jobs:
           # Spend the compute budget on more source documents instead of repeating a costly sweep.
           for rate in 0.0003; do
             label="${rate//./_}"
-            npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs }}" --seed "${{ inputs.seed }}" --optimizer adam --context-size 16 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate" --max-minutes 45
+            npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs }}" --seed "${{ inputs.seed }}" --optimizer adam --context-size 16 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate" --max-minutes 30 --max-tokens-per-example 192
           done
       - name: Verify checkpoints and rank experiments by validation only
         run: |
