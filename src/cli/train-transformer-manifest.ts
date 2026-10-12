@@ -14,7 +14,7 @@ function parseArgs(args: string[]): Map<string, string> {
     const value = args[i + 1];
     if (!value || value.startsWith("--")) throw new Error(`Missing value for ${key}`);
     if (options.has(name)) throw new Error(`Duplicate option: ${key}`);
-    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size"].includes(name)) {
+    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer"].includes(name)) {
       throw new Error(`Unknown option: ${key}`);
     }
     options.set(name, value);
@@ -76,6 +76,8 @@ async function main(): Promise<void> {
   const epochs = numeric(options, "epochs", 1);
   const seed = numeric(options, "seed", 17);
   const learningRate = numeric(options, "learning-rate", 0.0001);
+  const optimizer = options.get("optimizer") ?? "adam";
+  if (optimizer !== "adam" && optimizer !== "sgd") throw new RangeError("optimizer must be adam or sgd.");
   if (!Number.isSafeInteger(epochs) || epochs < 1 || epochs > 1000) throw new RangeError("epochs must be an integer between 1 and 1000.");
   if (!Number.isSafeInteger(seed)) throw new RangeError("seed must be a safe integer.");
   if (learningRate <= 0 || learningRate > 0.02) throw new RangeError("learning-rate must be in (0, 0.02].");
@@ -106,7 +108,7 @@ async function main(): Promise<void> {
   for (const example of trainingExamples) {
     const tokens = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
     if (tokens.length < 2) continue;
-    const metrics = model.train(tokens, learningRate, epochs);
+    const metrics = model.train(tokens, learningRate, epochs, 1, optimizer);
     weightedLoss += metrics.loss * metrics.examples;
     trainedTokens += metrics.examples;
     lastGradientNorm = metrics.gradientNorm;
@@ -141,7 +143,7 @@ async function main(): Promise<void> {
       validationAndTestUsedForTraining: false,
     },
     training: {
-      seed, epochsPerExample: epochs, learningRate,
+      seed, epochsPerExample: epochs, learningRate, optimizer,
       trainedExamples: trainingExamples.length,
       trainedNextTokenTargets: trainedTokens,
       meanFinalTrainingLoss: weightedLoss / trainedTokens,
