@@ -19,6 +19,8 @@ test("Transformer backpropagation updates parameters and returns finite metrics"
   const metrics = model.train(sample, 0.0001, 1);
   const after = model.toCheckpoint().weights;
   assert.ok(Number.isFinite(metrics.loss));
+  assert.ok(Number.isFinite(metrics.gradientNorm) && metrics.gradientNorm >= 0);
+  assert.ok(metrics.gradientScale > 0 && metrics.gradientScale <= 1);
   assert.equal(metrics.examples, sample.length - 1);
   assert.ok(after.some((value, index) => value !== before[index]));
 });
@@ -52,4 +54,22 @@ test("Transformer backpropagation lowers loss on a repeated next-token task", ()
   assert.equal(metrics.examples, tokens.length - 1);
   assert.ok(model.toCheckpoint().weights.some((value, index) => value !== initial[index]));
   assert.ok(after > before, "the repeated target token should become more probable");
+});
+
+
+test("Transformer gradient clipping bounds the averaged update norm", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 31 };
+  const tokens = [1, 2, 3, 4, 1, 2, 3, 4];
+  const clipped = new TransformerModel(tinyConfig);
+  const metrics = clipped.train(tokens, 0.01, 1, 0.05);
+  assert.ok(metrics.gradientNorm > 0.05);
+  assert.ok(Math.abs(metrics.gradientScale - 0.05 / metrics.gradientNorm) < 1e-12);
+  assert.throws(() => new TransformerModel(tinyConfig).train(tokens, 0.01, 1, 0), /maxGradientNorm/i);
+  assert.throws(() => new TransformerModel(tinyConfig).train(tokens, 0.01, 1, Number.POSITIVE_INFINITY), /maxGradientNorm/i);
+});
+
+test("Transformer leaves gradients unclipped when below the configured threshold", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 37 };
+  const metrics = new TransformerModel(tinyConfig).train([1, 2, 1, 2, 1], 0.001, 1, 1e6);
+  assert.equal(metrics.gradientScale, 1);
 });
