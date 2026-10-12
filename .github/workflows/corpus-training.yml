@@ -6,12 +6,12 @@ on:
       documents:
         description: "Number of eligible CC0 abstracts to acquire (3-1000)"
         required: true
-        default: "1000"
+        default: "200"
         type: string
       max_rows:
         description: "Maximum dataset-viewer rows to scan (100-20000)"
         required: true
-        default: "20000"
+        default: "5000"
         type: string
       epochs:
         description: "Training epochs per example (start small)"
@@ -30,7 +30,7 @@ permissions:
 jobs:
   acquire-train-evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -52,7 +52,7 @@ jobs:
           # Spend the compute budget on more source documents instead of repeating a costly sweep.
           for rate in 0.0003; do
             label="${rate//./_}"
-            npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs }}" --seed "${{ inputs.seed }}" --optimizer adam --context-size 32 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate"
+            npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs }}" --seed "${{ inputs.seed }}" --optimizer adam --context-size 32 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate" --max-minutes 45
           done
       - name: Verify checkpoints and rank experiments by validation only
         run: |

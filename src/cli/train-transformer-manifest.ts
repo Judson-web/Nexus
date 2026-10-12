@@ -15,7 +15,7 @@ function parseArgs(args: string[]): Map<string, string> {
     const value = args[i + 1];
     if (!value || value.startsWith("--")) throw new Error(`Missing value for ${key}`);
     if (options.has(name)) throw new Error(`Duplicate option: ${key}`);
-    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer"].includes(name)) {
+    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "max-minutes"].includes(name)) {
       throw new Error(`Unknown option: ${key}`);
     }
     options.set(name, value);
@@ -77,6 +77,9 @@ async function main(): Promise<void> {
   const epochs = numeric(options, "epochs", 1);
   const seed = numeric(options, "seed", 17);
   const learningRate = numeric(options, "learning-rate", 0.0001);
+  const maxMinutes = numeric(options, "max-minutes", 30);
+  if (maxMinutes <= 0 || maxMinutes > 300) throw new RangeError("max-minutes must be in (0, 300].");
+  const deadline = Date.now() + maxMinutes * 60_000;
   const optimizer = options.get("optimizer") ?? "adam";
   if (optimizer !== "adam" && optimizer !== "sgd") throw new RangeError("optimizer must be adam or sgd.");
   if (!Number.isSafeInteger(epochs) || epochs < 1 || epochs > 1000) throw new RangeError("epochs must be an integer between 1 and 1000.");
@@ -107,10 +110,18 @@ async function main(): Promise<void> {
 
   // Each manifest line is a separate sequence. Only the train split is ever
   // passed to train(); validation and test text are provenance-only here.
+  let exampleIndex = 0;
+  const startedAt = Date.now();
   for (const example of trainingExamples) {
+    exampleIndex += 1;
+    if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit before example ${exampleIndex}/${trainingExamples.length}.`);
     const tokens = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
     if (tokens.length < 2) continue;
-    const metrics = model.train(tokens, learningRate, epochs, 1, optimizer);
+    console.error(`[train] example ${exampleIndex}/${trainingExamples.length}; targets=${tokens.length - 1}; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
+    const metrics = model.train(tokens, learningRate, epochs, 1, optimizer, (progress) => {
+      if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit during example ${exampleIndex}/${trainingExamples.length}.`);
+      console.error(`[train] example ${exampleIndex}/${trainingExamples.length} epoch ${progress.epoch}/${progress.epochs}: ${progress.targetsProcessed}/${progress.totalTargets} targets; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
+    });
     weightedLoss += metrics.loss * metrics.examples;
     trainedTokens += metrics.examples;
     lastGradientNorm = metrics.gradientNorm;
