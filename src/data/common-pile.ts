@@ -75,7 +75,7 @@ export function reviewRows(rows: readonly CommonPileRow[], targetDocuments: numb
   let rejectedLicenseOrMetadata = 0;
   let duplicateDocuments = 0;
 
-  for (const row of rows) {
+  for (const row of [...rows].sort((a, b) => a.id.localeCompare(b.id))) {
     if (!isExplicitCc0Row(row)) {
       rejectedLicenseOrMetadata += 1;
       continue;
