@@ -35,7 +35,7 @@ export async function loadVerifiedTransformerArtifact(
     readFile(checkpointPath),
     readFile(`${checkpointPath}.sha256`, "utf8"),
   ]);
-  const match = /^([a-f0-9]{64})\\s+(\\d+)\\s*$/.exec(sidecar);
+  const match = /^([a-f0-9]{64})\s+(\d+)\s*$/.exec(sidecar);
   if (!match || !SHA256_PATTERN.test(match[1]!)) {
     throw new Error("Transformer checksum sidecar is malformed.");
   }
