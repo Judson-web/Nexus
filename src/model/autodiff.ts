@@ -3,9 +3,8 @@
  * workloads. Each value records its parents and local derivatives; backward()
  * accumulates gradients in reverse topological order.
  *
- * This engine is intentionally minimal and dependency-free. It is a building
- * block for replacing SPSA with exact gradients in the Transformer, not a claim
- * that the existing Transformer trainer already uses backpropagation.
+ * This engine is intentionally minimal and dependency-free. It powers exact
+ * reverse-mode gradients for the in-repository Transformer research trainer.
  */
 export class Value {
   public grad = 0;
@@ -84,15 +83,25 @@ export class Value {
 
   public backward(seed = 1): void {
     if (!Number.isFinite(seed)) throw new RangeError("Gradient seed must be finite.");
+    // Use an explicit stack rather than recursive DFS: Transformer graphs can
+    // contain many thousands of scalar nodes, exceeding the JS call-stack limit.
     const order: Value[] = [];
     const visited = new Set<Value>();
-    const visit = (node: Value): void => {
-      if (visited.has(node)) return;
-      visited.add(node);
-      for (const parent of node.parents) visit(parent.value);
-      order.push(node);
-    };
-    visit(this);
+    const stack: { node: Value; expanded: boolean }[] = [{ node: this, expanded: false }];
+    while (stack.length > 0) {
+      const entry = stack.pop()!;
+      if (entry.expanded) {
+        order.push(entry.node);
+        continue;
+      }
+      if (visited.has(entry.node)) continue;
+      visited.add(entry.node);
+      stack.push({ node: entry.node, expanded: true });
+      for (let i = entry.node.parents.length - 1; i >= 0; i--) {
+        const parent = entry.node.parents[i]!;
+        if (!visited.has(parent.value)) stack.push({ node: parent.value, expanded: false });
+      }
+    }
     for (const node of order) node.grad = 0;
     this.grad = seed;
     for (let i = order.length - 1; i >= 0; i--) {
