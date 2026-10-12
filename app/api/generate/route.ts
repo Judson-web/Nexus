@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { BigramModel } from "../../../src/model/bigram-model.js";
 import { loadVerifiedTransformerArtifact } from "../../../src/model/verified-transformer-artifact.js";
 import type { TransformerModel } from "../../../src/model/transformer-model.js";
-import { access } from "node:fs/promises";
 import { ByteTokenizer } from "../../../src/tokenizer/byte-tokenizer.js";
 
 export const runtime = "nodejs";
