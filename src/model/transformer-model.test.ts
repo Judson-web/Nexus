@@ -96,3 +96,18 @@ test("Transformer Adam optimizer trains deterministically and validates its name
   assert.ok(first.toCheckpoint().weights.some((weight, i) => weight !== new TransformerModel(tinyConfig).toCheckpoint().weights[i]));
   assert.throws(() => new TransformerModel(tinyConfig).train(tokens, 0.001, 1, 1, "bad" as "adam"), /optimizer/i);
 });
+
+
+test("Transformer generation suppresses premature EOS for a bounded minimum continuation", () => {
+  const model = new TransformerModel({ ...config, vocabSize: 257 });
+  const generated = model.generate([84, 101, 115, 116], 4, () => 0.999999, 4);
+  assert.equal(generated.length, 8);
+  assert.ok(generated.slice(4).every((token) => token !== 256), "EOS must not terminate the minimum continuation");
+  assert.throws(() => model.generate([1], 2, () => 0.5, -1), /minTokens/);
+});
+
+test("Transformer generation resumes normal EOS sampling after the minimum continuation", () => {
+  const model = new TransformerModel({ ...config, vocabSize: 257 });
+  const generated = model.generate([84], 3, () => 0.999999, 1);
+  assert.equal(generated.length, 4);
+});
