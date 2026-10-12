@@ -178,7 +178,8 @@ async function main(): Promise<void> {
       lastGradientNorm, lastGradientScale,
     },
     model: config,
-    heldOutEvaluation,\n    warning: "Research checkpoint only. Held-out metrics are diagnostics, not proof of general language ability. Do not tune hyperparameters against test results.",
+    heldOutEvaluation,
+    warning: "Research checkpoint only. Held-out metrics are diagnostics, not proof of general language ability. Do not tune hyperparameters against test results.",
   };
   await writeAtomic(outputPath, checkpointContent);
   await writeAtomic(`${outputPath}.sha256`, `${checkpointSha256}  ${checkpointBytes.length}\n`);
