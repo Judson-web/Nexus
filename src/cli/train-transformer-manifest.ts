@@ -90,7 +90,6 @@ async function main(): Promise<void> {
 
   const config = {
     ...DEFAULT_TRANSFORMER_CONFIG,
-    vocabSize: 257,
     contextSize: numeric(options, "context-size", 32),
     embeddingSize: numeric(options, "embedding-size", 4),
     headCount: numeric(options, "heads", 2),
@@ -99,7 +98,8 @@ async function main(): Promise<void> {
   };
   // Learn merges from training text only; held-out text never influences token IDs.
   const tokenizer = BytePairTokenizer.train(trainingExamples.map((example) => example.text), 255);
-  const model = new TransformerModel({ ...config, vocabSize: tokenizer.vocabSize });
+  const modelConfig = { ...config, vocabSize: tokenizer.vocabSize };
+  const model = new TransformerModel(modelConfig);
   let weightedLoss = 0;
   let trainedTokens = 0;
   let lastGradientNorm = 0;
@@ -126,7 +126,7 @@ async function main(): Promise<void> {
     testUsedForModelSelection: false,
   };
 
-  const checkpointContent = JSON.stringify(model.toCheckpoint(), null, 2) + "\n";
+  const checkpointContent = JSON.stringify({ ...model.toCheckpoint(), tokenizer: tokenizer.toJSON() }, null, 2) + "\n";
   const checkpointBytes = Buffer.from(checkpointContent, "utf8");
   const checkpointSha256 = createHash("sha256").update(checkpointBytes).digest("hex");
   const manifestSha256 = createHash("sha256").update(rawManifest, "utf8").digest("hex");
@@ -152,7 +152,7 @@ async function main(): Promise<void> {
       meanFinalTrainingLoss: weightedLoss / trainedTokens,
       lastGradientNorm, lastGradientScale,
     },
-    model: config,
+    model: modelConfig,
     heldOutEvaluation,
     warning: "Research checkpoint only. Held-out metrics are diagnostics, not proof of general language ability. Do not tune hyperparameters against test results.",
   };
