@@ -21,7 +21,7 @@ export function transformerLossAndGradients(
 ): TransformerGradientResult {
   const { vocabSize: v, contextSize: c, embeddingSize: e, headCount } = config;
   const f = config.feedForwardSize;
-  const expectedLength = v * e + c * e + 4 * e * e + 2 * e + e * f + f + f * e + e + e * v + v;
+  const expectedLength = v * e + c * e + 4 * e * e + 4 * e + e * f + f + f * e + e + e * v + v;
   if (weights.length !== expectedLength) throw new RangeError("Transformer weight vector length mismatch.");
   if (!Number.isSafeInteger(target) || target < 0 || target >= v) throw new RangeError("Target token is out of range.");
   if (context.some((token) => !Number.isSafeInteger(token) || token < 0 || token >= v)) throw new RangeError("Context contains an invalid token.");
