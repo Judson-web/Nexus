@@ -78,6 +78,32 @@ jobs:
             writeFileSync("artifacts/experiment-results.json", JSON.stringify({ selectionMetric: "validation negative log-likelihood (test set not used for selection)", experiments: results }, null, 2) + "\n");
             console.log(JSON.stringify({ acceptedExamples: manifest.acceptedExamples, splits: manifest.splits, selectionMetric: "validation negative log-likelihood (test set not used for selection)", experiments: results }, null, 2));
           '
+      - name: Generate samples from validation-selected checkpoint
+        run: |
+          set -euo pipefail
+          best_rate=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; const r = JSON.parse(readFileSync("artifacts/experiment-results.json", "utf8")); const rate = r.experiments[0]?.learningRate; if (!Number.isFinite(rate)) throw new Error("No validation-ranked checkpoint"); process.stdout.write(String(rate).replaceAll(".", "_"));')
+          checkpoint="artifacts/transformer-lr-${best_rate}.json"
+          test -s "$checkpoint"
+          mkdir -p artifacts/generation-samples
+          npm run generate:transformer -- --checkpoint "$checkpoint" --prompt "The universe is" --tokens 120 > artifacts/generation-samples/universe.txt
+          npm run generate:transformer -- --checkpoint "$checkpoint" --prompt "In this paper, we present" --tokens 120 > artifacts/generation-samples/research.txt
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const prompts = ["The universe is", "In this paper, we present"];
+            const files = ["artifacts/generation-samples/universe.txt", "artifacts/generation-samples/research.txt"];
+            const samples = files.map((path, index) => {
+              const text = readFileSync(path, "utf8");
+              const prompt = prompts[index];
+              if (!text.startsWith(prompt)) throw new Error("Generated sample lost its prompt: " + path);
+              const continuation = text.slice(prompt.length).trim();
+              if (continuation.length < 20) throw new Error("Generation returned too little continuation: " + path);
+              if (!/[A-Za-z]/.test(continuation)) throw new Error("Generation contains no readable Latin text: " + path);
+              if (/^(.)\\1{19,}$/s.test(continuation)) throw new Error("Generation collapsed to a repeated character: " + path);
+              return { prompt, continuationCharacters: continuation.length, sample: text };
+            });
+            writeFileSync("artifacts/generation-samples/summary.json", JSON.stringify({ selectedBy: "validation negative log-likelihood", qualityNote: "Automated checks establish non-empty text only; inspect samples for coherence and repetition before calling the model useful.", samples }, null, 2) + "\\n");
+            console.log(JSON.stringify(samples.map(({ prompt, continuationCharacters }) => ({ prompt, continuationCharacters })), null, 2));
+          '
       - uses: actions/upload-artifact@v4
         with:
           name: nexus-common-pile-transformer-${{ github.run_id }}
@@ -89,5 +115,6 @@ jobs:
             artifacts/transformer-lr-*.json.provenance.json
             artifacts/tokenizer-audit.json
             artifacts/experiment-results.json
+            artifacts/generation-samples/
           if-no-files-found: error
           retention-days: 14
