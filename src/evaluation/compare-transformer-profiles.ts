@@ -1,5 +1,12 @@
 export interface TransformerProfileReport {
   readonly dataset: { readonly sourceSha256: string; readonly tokenCount: number };
+  readonly runtime: {
+    readonly nodeVersion: string;
+    readonly platform: string;
+    readonly architecture: string;
+    readonly cpuModel: string;
+    readonly logicalCpuCount: number;
+  };
   readonly model: {
     readonly family: string;
     readonly config: Record<string, unknown>;
@@ -27,11 +34,20 @@ function finiteNumber(value: unknown, name: string): number {
   return value;
 }
 
+function nonEmptyString(value: unknown, name: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError(`Invalid profile report: ${name} must be a non-empty string.`);
+  }
+  return value;
+}
+
 export function parseTransformerProfileReport(value: unknown): TransformerProfileReport {
-  if (!isRecord(value) || !isRecord(value.dataset) || !isRecord(value.model) || !isRecord(value.profile)) {
-    throw new TypeError("Invalid profile report: expected dataset, model, and profile objects.");
+  if (!isRecord(value) || !isRecord(value.dataset) || !isRecord(value.runtime) ||
+      !isRecord(value.model) || !isRecord(value.profile)) {
+    throw new TypeError("Invalid profile report: expected dataset, runtime, model, and profile objects.");
   }
   const dataset = value.dataset;
+  const runtime = value.runtime;
   const model = value.model;
   const profile = value.profile;
   if (typeof dataset.sourceSha256 !== "string" || !/^[a-f0-9]{64}$/.test(dataset.sourceSha256)) {
@@ -39,10 +55,21 @@ export function parseTransformerProfileReport(value: unknown): TransformerProfil
   }
   if (!isRecord(model.config)) throw new TypeError("Invalid profile report: model.config must be an object.");
   if (typeof model.family !== "string") throw new TypeError("Invalid profile report: model.family must be a string.");
+  const logicalCpuCount = finiteNumber(runtime.logicalCpuCount, "runtime.logicalCpuCount");
+  if (!Number.isSafeInteger(logicalCpuCount) || logicalCpuCount < 1) {
+    throw new TypeError("Invalid profile report: runtime.logicalCpuCount must be a positive integer.");
+  }
   return {
     dataset: {
       sourceSha256: dataset.sourceSha256,
       tokenCount: finiteNumber(dataset.tokenCount, "dataset.tokenCount"),
+    },
+    runtime: {
+      nodeVersion: nonEmptyString(runtime.nodeVersion, "runtime.nodeVersion"),
+      platform: nonEmptyString(runtime.platform, "runtime.platform"),
+      architecture: nonEmptyString(runtime.architecture, "runtime.architecture"),
+      cpuModel: nonEmptyString(runtime.cpuModel, "runtime.cpuModel"),
+      logicalCpuCount,
     },
     model: {
       family: model.family,
@@ -83,6 +110,9 @@ export function compareTransformerProfileReports(baselineInput: unknown, current
   if (stableJson(baseline.model.config) !== stableJson(current.model.config)) {
     throw new Error("Cannot compare profiles: model.config differs between reports.");
   }
+  if (stableJson(baseline.runtime) !== stableJson(current.runtime)) {
+    throw new Error("Cannot compare profiles: runtime environment differs between reports.");
+  }
   if (baseline.dataset.sourceSha256 !== current.dataset.sourceSha256 ||
       baseline.dataset.tokenCount !== current.dataset.tokenCount) {
     throw new Error("Cannot compare profiles: dataset fingerprint or token count differs.");
@@ -98,6 +128,7 @@ export function compareTransformerProfileReports(baselineInput: unknown, current
     compatible: true as const,
     datasetSha256: baseline.dataset.sourceSha256,
     tokenCount: baseline.dataset.tokenCount,
+    runtime: baseline.runtime,
     model: { family: baseline.model.family, parameterCount: baseline.model.parameterCount, epochs: baseline.model.epochs, repeats: baseline.model.repeats },
     metrics: {
       totalDurationMs: metric(baseline.profile.totalDurationMs, current.profile.totalDurationMs),
