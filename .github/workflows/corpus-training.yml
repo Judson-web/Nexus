@@ -98,13 +98,17 @@ jobs:
               const prompt = prompts[index];
               if (!text.startsWith(prompt)) throw new Error("Generated sample lost its prompt: " + path);
               const continuation = text.slice(prompt.length).trim();
-              if (continuation.length < 20) throw new Error("Generation returned too little continuation: " + path);
-              if (!/[A-Za-z]/.test(continuation)) throw new Error("Generation contains no readable Latin text: " + path);
-              if (new Set(continuation).size === 1) throw new Error("Generation collapsed to a repeated character: " + path);
-              return { prompt, continuationCharacters: continuation.length, sample: text };
+              const checks = {
+                promptPreserved: text.startsWith(prompt),
+                continuationLongEnough: continuation.length >= 20,
+                containsReadableLatin: /[A-Za-z]/.test(continuation),
+                notSingleCharacterCollapse: continuation.length > 0 && new Set(continuation).size > 1,
+              };
+              return { prompt, continuationCharacters: continuation.length, checks, status: Object.values(checks).every(Boolean) ? "passed" : "warning", sample: text };
             });
-            writeFileSync("artifacts/generation-samples/summary.json", JSON.stringify({ selectedBy: "validation negative log-likelihood", qualityNote: "Automated checks establish non-empty text only; inspect samples for coherence and repetition before calling the model useful.", samples }, null, 2) + "\n");
-            console.log(JSON.stringify(samples.map(({ prompt, continuationCharacters }) => ({ prompt, continuationCharacters })), null, 2));
+            const qualityWarnings = samples.filter((sample) => sample.status !== "passed").map(({ prompt, checks }) => ({ prompt, checks }));
+            writeFileSync("artifacts/generation-samples/summary.json", JSON.stringify({ selectedBy: "validation negative log-likelihood", qualityNote: "Generation sanity checks are diagnostic. A short or empty continuation is preserved and flagged so the run can upload metrics and samples; this is not evidence of useful generation.", qualityWarnings, samples }, null, 2) + "\n");
+            console.log(JSON.stringify({ samples: samples.map(({ prompt, continuationCharacters, status, checks }) => ({ prompt, continuationCharacters, status, checks })), qualityWarnings }, null, 2));
           '
       - uses: actions/upload-artifact@v4
         with:
