@@ -77,16 +77,20 @@ async function main(): Promise<void> {
   const outputDirectory = options.get("output") ?? "artifacts/common-pile-arxiv-abstracts";
   const rows: CommonPileRow[] = [];
   let offset = 0;
-  while (offset < maxRows && rows.length < targetDocuments * 3) {
+  let reviewed = reviewRows(rows, targetDocuments);
+  while (offset < maxRows && reviewed.accepted.length < targetDocuments) {
     const pageLength = Math.min(100, maxRows - offset);
     const page = await fetchPage(offset, pageLength, timeoutMs);
     if (page.length === 0) break;
     rows.push(...page);
     offset += page.length;
+    reviewed = reviewRows(rows, targetDocuments);
     if (page.length < pageLength) break;
   }
 
-  const reviewed = reviewRows(rows, targetDocuments);
+  if (reviewed.accepted.length !== targetDocuments) {
+    throw new Error(`Bounded scan found only ${reviewed.accepted.length} of ${targetDocuments} eligible unique CC0 records after scanning ${rows.length} rows. Increase --max-rows; no data was written.`);
+  }
   const splitCounts: Record<SourceSplit, number> = { train: 0, validation: 0, test: 0 };
   for (const item of reviewed.accepted) splitCounts[item.split] += 1;
   if (Object.values(splitCounts).some((count) => count === 0)) {
