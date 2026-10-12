@@ -3,7 +3,8 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { validateDatasetManifest } from "../evaluation/manifest.js";
 import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel } from "../model/transformer-model.js";
-import { ByteTokenizer, EOS_TOKEN_ID } from "../tokenizer/byte-tokenizer.js";
+import { EOS_TOKEN_ID } from "../tokenizer/byte-tokenizer.js";
+import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
 
 function parseArgs(args: string[]): Map<string, string> {
   const options = new Map<string, string>();
@@ -41,7 +42,7 @@ async function writeAtomic(path: string, content: string): Promise<void> {
 function scoreSplit(
   examples: readonly { readonly text: string }[],
   model: TransformerModel,
-  tokenizer: ByteTokenizer,
+  tokenizer: BytePairTokenizer,
   contextSize: number,
 ) {
   let totalNegativeLogLikelihood = 0;
@@ -90,14 +91,15 @@ async function main(): Promise<void> {
   const config = {
     ...DEFAULT_TRANSFORMER_CONFIG,
     vocabSize: 257,
-    contextSize: numeric(options, "context-size", 3),
+    contextSize: numeric(options, "context-size", 32),
     embeddingSize: numeric(options, "embedding-size", 4),
     headCount: numeric(options, "heads", 2),
     feedForwardSize: numeric(options, "feed-forward-size", 8),
     seed,
   };
-  const tokenizer = new ByteTokenizer();
-  const model = new TransformerModel(config);
+  // Learn merges from training text only; held-out text never influences token IDs.
+  const tokenizer = BytePairTokenizer.train(trainingExamples.map((example) => example.text), 255);
+  const model = new TransformerModel({ ...config, vocabSize: tokenizer.vocabSize });
   let weightedLoss = 0;
   let trainedTokens = 0;
   let lastGradientNorm = 0;
@@ -144,6 +146,7 @@ async function main(): Promise<void> {
     },
     training: {
       seed, epochsPerExample: epochs, learningRate, optimizer,
+      tokenizer: { type: "train-only byte-pair", merges: tokenizer.toJSON().merges.length, vocabSize: tokenizer.vocabSize },
       trainedExamples: trainingExamples.length,
       trainedNextTokenTargets: trainedTokens,
       meanFinalTrainingLoss: weightedLoss / trainedTokens,
