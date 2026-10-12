@@ -10,6 +10,24 @@ test("reverse mode accumulates gradients across shared graph nodes", () => {
   assert.equal(x.grad, 8);
 });
 
+test("numeric constants do not change gradients for scalar arithmetic", () => {
+  const x = Value.of(4);
+  const y = x.add(3).sub(2).mul(5).div(2);
+  y.backward();
+  assert.equal(y.data, 12.5);
+  assert.equal(x.grad, 2.5);
+});
+
+test("value operands retain gradients on both sides of arithmetic", () => {
+  const x = Value.of(6);
+  const y = Value.of(3);
+  const result = x.div(y).add(x.mul(y)).sub(y);
+  result.backward();
+  assert.equal(result.data, 17);
+  assert.equal(x.grad, 1 / 3 + 3);
+  assert.equal(y.grad, -6 / 9 + 6 - 1);
+});
+
 test("reverse mode differentiates composite smooth expressions", () => {
   const x = Value.of(1.7);
   const y = x.pow(3).div(2).add(x.exp()).sub(x.tanh());
@@ -33,6 +51,8 @@ test("autodiff rejects invalid operations and non-finite operands", () => {
   assert.throws(() => Value.of(0).log(), /positive/i);
   assert.throws(() => Value.of(1000).exp(), /overflow/i);
   assert.throws(() => Value.of(Number.NaN), /finite/i);
+  assert.throws(() => Value.of(1).add(Number.NaN), /finite/i);
+  assert.throws(() => Value.of(1).mul(Number.POSITIVE_INFINITY), /finite/i);
 });
 
 test("reverse mode handles deep graphs without recursive call-stack overflow", () => {
