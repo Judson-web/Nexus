@@ -21,7 +21,7 @@ test("Transformer profiler returns per-epoch loss and throughput with reproducib
     assert.ok(Number.isFinite(report.profile.medianFinalLoss));
     assert.ok(report.model.parameterCount > 0);
     assert.match(report.dataset.sourceSha256, /^[a-f0-9]{64}$/);
-    for (const epoch of report.profile.epochs) {
+    for (const epoch of report.profile.runs[0]!.epochs) {
       assert.ok(Number.isFinite(epoch.loss));
       assert.ok(epoch.durationMs >= 0);
       assert.ok(Number.isFinite(epoch.examplesPerSecond));
