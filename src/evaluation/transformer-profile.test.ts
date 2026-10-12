@@ -52,3 +52,33 @@ test("Transformer profiler rejects invalid settings and empty input", async () =
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("Transformer profiler reports target stride and sampled target throughput", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nexus-profile-stride-"));
+  const path = join(directory, "corpus.txt");
+  try {
+    await writeFile(path, "Nexus learns deterministic byte patterns. ".repeat(3), "utf8");
+    const baseline = await profileTransformerTraining(path, {
+      epochs: 1,
+      repeats: 1,
+      targetStride: 1,
+      config: { contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 11 },
+    });
+    const strided = await profileTransformerTraining(path, {
+      epochs: 1,
+      repeats: 1,
+      targetStride: 2,
+      config: { contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 11 },
+    });
+    assert.equal(baseline.model.targetStride, 1);
+    assert.equal(strided.model.targetStride, 2);
+    assert.equal(baseline.profile.runs[0]!.epochs[0]!.targetsProcessed, baseline.dataset.tokenCount - 1);
+    assert.ok(strided.profile.runs[0]!.epochs[0]!.targetsProcessed < baseline.profile.runs[0]!.epochs[0]!.targetsProcessed);
+    assert.ok(Number.isFinite(strided.profile.meanTargetsPerSecond));
+    assert.ok(strided.profile.meanTargetsPerSecond > 0);
+    await assert.rejects(profileTransformerTraining(path, { targetStride: 0 }), /targetStride/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

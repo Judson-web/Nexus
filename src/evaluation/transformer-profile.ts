@@ -9,6 +9,7 @@ export interface TransformerProfileOptions {
   readonly epochs?: number;
   readonly learningRate?: number;
   readonly repeats?: number;
+  readonly targetStride?: number;
   readonly config?: Partial<TransformerConfig>;
 }
 
@@ -23,6 +24,10 @@ export async function profileTransformerTraining(
   }
   if (!Number.isFinite(learningRate) || learningRate <= 0 || learningRate > 0.02) {
     throw new RangeError("learningRate must be in (0, 0.02].");
+  }
+  const targetStride = options.targetStride ?? 1;
+  if (!Number.isSafeInteger(targetStride) || targetStride < 1 || targetStride > 32) {
+    throw new RangeError("targetStride must be an integer between 1 and 32.");
   }
   const repeats = options.repeats ?? 1;
   if (!Number.isSafeInteger(repeats) || repeats < 1 || repeats > 20) {
@@ -41,22 +46,25 @@ export async function profileTransformerTraining(
     totalDurationMs: number;
     meanEpochDurationMs: number;
     meanExamplesPerSecond: number;
+    meanTargetsPerSecond: number;
     finalLoss: number;
-    epochs: { epoch: number; loss: number; durationMs: number; examplesPerSecond: number }[];
+    epochs: { epoch: number; loss: number; durationMs: number; examplesPerSecond: number; targetsProcessed: number; targetsPerSecond: number }[];
   }[] = [];
 
   for (let run = 1; run <= repeats; run += 1) {
     const model = new TransformerModel(config);
-    const epochMetrics: { epoch: number; loss: number; durationMs: number; examplesPerSecond: number }[] = [];
+    const epochMetrics: { epoch: number; loss: number; durationMs: number; examplesPerSecond: number; targetsProcessed: number; targetsPerSecond: number }[] = [];
     for (let epoch = 1; epoch <= epochs; epoch += 1) {
       const started = performance.now();
-      const metrics = model.train(tokens, learningRate, 1);
+      const metrics = model.train(tokens, learningRate, 1, 1, "sgd", undefined, targetStride);
       const durationMs = performance.now() - started;
       epochMetrics.push({
         epoch,
         loss: metrics.loss,
         durationMs,
         examplesPerSecond: metrics.examples / Math.max(durationMs / 1000, Number.EPSILON),
+        targetsProcessed: metrics.examples,
+        targetsPerSecond: metrics.examples / Math.max(durationMs / 1000, Number.EPSILON),
       });
     }
     const totalDurationMs = epochMetrics.reduce((sum, item) => sum + item.durationMs, 0);
@@ -65,6 +73,7 @@ export async function profileTransformerTraining(
       totalDurationMs,
       meanEpochDurationMs: totalDurationMs / epochs,
       meanExamplesPerSecond: epochMetrics.reduce((sum, item) => sum + item.examplesPerSecond, 0) / epochs,
+      meanTargetsPerSecond: epochMetrics.reduce((sum, item) => sum + item.targetsPerSecond, 0) / epochs,
       finalLoss: epochMetrics[epochMetrics.length - 1]!.loss,
       epochs: epochMetrics,
     });
@@ -80,6 +89,7 @@ export async function profileTransformerTraining(
   const totalDurationMs = median(runMetrics.map((run) => run.totalDurationMs));
   const meanEpochDurationMs = median(runMetrics.map((run) => run.meanEpochDurationMs));
   const meanExamplesPerSecond = median(runMetrics.map((run) => run.meanExamplesPerSecond));
+  const meanTargetsPerSecond = median(runMetrics.map((run) => run.meanTargetsPerSecond));
 
   return {
     dataset: {
@@ -93,11 +103,12 @@ export async function profileTransformerTraining(
       cpuModel: cpus()[0]?.model ?? "unknown",
       logicalCpuCount: cpus().length,
     },
-    model: { family: "nexus-transformer", config, parameterCount, epochs, learningRate, repeats },
+    model: { family: "nexus-transformer", config, parameterCount, epochs, learningRate, repeats, targetStride },
     profile: {
       totalDurationMs,
       meanEpochDurationMs,
       meanExamplesPerSecond,
+      meanTargetsPerSecond,
       medianFinalLoss: median(runMetrics.map((run) => run.finalLoss)),
       runs: runMetrics,
     },
