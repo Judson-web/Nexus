@@ -311,19 +311,33 @@ export class TransformerModel {
     return { loss: loss / exampleCount, examples: exampleCount, gradientNorm, gradientScale };
   }
 
-  public generate(prompt: readonly number[], maxTokens: number, random: () => number = Math.random): number[] {
+  public generate(
+    prompt: readonly number[],
+    maxTokens: number,
+    random: () => number = Math.random,
+    minTokens = 8,
+  ): number[] {
     this.validateTokens(prompt);
     checkInteger(maxTokens, "maxTokens", 0, 10000);
+    checkInteger(minTokens, "minTokens", 0, 10000);
     const output = [...prompt];
+    const requiredTokens = Math.min(maxTokens, minTokens);
     for (let i = 0; i < maxTokens; i++) {
       const probabilities = this.forward(output.slice(-this.config.contextSize));
+      // A barely trained model can assign excessive probability to EOS and
+      // terminate before emitting anything useful. Suppress EOS only during a
+      // bounded minimum continuation; after that, normal EOS behavior resumes.
+      if (i < requiredTokens && probabilities.length > 256) probabilities[256] = 0;
+      let totalProbability = 0;
+      for (const probability of probabilities) totalProbability += probability;
       const draw = random();
       if (!Number.isFinite(draw) || draw < 0 || draw >= 1) throw new RangeError("Random draw must be in [0, 1).");
+      const threshold = draw * totalProbability;
       let cumulative = 0;
       let selected = probabilities.length - 1;
       for (let token = 0; token < probabilities.length; token++) {
         cumulative += probabilities[token]!;
-        if (draw < cumulative) { selected = token; break; }
+        if (threshold < cumulative) { selected = token; break; }
       }
       output.push(selected);
     }
