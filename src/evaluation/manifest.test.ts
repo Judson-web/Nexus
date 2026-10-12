@@ -28,6 +28,9 @@ test("manifest evaluator trains only on train examples and reports held-out metr
       assert.ok(model.validation.tokens > 0 && model.test.tokens > 0);
       assert.ok(Number.isFinite(model.validation.perplexity));
       assert.ok(Number.isFinite(model.test.perplexity));
+      assert.ok(model.validation.utf8Bytes > 0 && model.test.utf8Bytes > 0);
+      assert.ok(Number.isFinite(model.validation.bitsPerByte) && model.validation.bitsPerByte > 0);
+      assert.ok(Number.isFinite(model.test.bitsPerByte) && model.test.bitsPerByte > 0);
     }
   } finally {
     await rm(directory, { recursive: true, force: true });
