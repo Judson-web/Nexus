@@ -37,6 +37,10 @@ Do not concatenate corpora blindly. Track examples/tokens by source, language, a
 4. Add one source at a time, audit duplicates and split leakage, then compare source-only and mixed-corpus baselines.
 5. Treat instruction tuning as a separate future stage with reviewed prompt/answer pairs. Do not mix prompt-only data into pretraining as if it contained answers.
 
+## Tokenization and context-window upgrade
+
+The manifest trainer now learns a deterministic byte-pair vocabulary from the **training split only**, persists its merge table inside the checkpoint, and uses that same tokenizer for generation. Vocabulary size is bounded at 512 IDs, including the 257 base byte/EOS IDs. The corpus-training workflow uses a 32-token context rather than 8 and audits token compression and sequence-length percentiles. This is a research baseline, not a production-grade tokenizer: compare its compression and generated text against the byte-level baseline, and keep the held-out splits out of tokenizer training.
+
 ## Success criteria
 
 A successful CI run proves only that acquisition, training, checkpoint integrity, and basic generation checks ran. It does **not** prove coherent language ability. Inspect the sample artifact for coherence, repetition, prompt copying, and malformed text; report held-out loss/perplexity separately from human-readable generation quality. No production deployment or live database change is part of this work.
