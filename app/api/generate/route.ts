@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { BigramModel } from "../../../src/model/bigram-model.js";
+import { loadVerifiedTransformerArtifact } from "../../../src/model/verified-transformer-artifact.js";
+import type { TransformerModel } from "../../../src/model/transformer-model.js";
 import { ByteTokenizer } from "../../../src/tokenizer/byte-tokenizer.js";
 
 export const runtime = "nodejs";
@@ -16,14 +18,24 @@ const CORPUS = [
 ].join("\n");
 
 let cachedModel: BigramModel | undefined;
+let cachedTransformer: Promise<{ model: TransformerModel; sha256: string }> | undefined;
 const tokenizer = new ByteTokenizer();
 
-function getModel(): BigramModel {
+function getBaselineModel(): BigramModel {
   if (cachedModel) return cachedModel;
   const model = new BigramModel({ vocabSize: 257, seed: 17, initializationScale: 0.01 });
   model.train(tokenizer.encode(CORPUS), 0.08, 8);
   cachedModel = model;
   return model;
+}
+
+async function getConfiguredTransformer(): Promise<{ model: TransformerModel; sha256: string } | undefined> {
+  const checkpointPath = process.env.NEXUS_TRANSFORMER_CHECKPOINT?.trim();
+  if (!checkpointPath) return undefined;
+  if (!cachedTransformer) {
+    cachedTransformer = loadVerifiedTransformerArtifact(checkpointPath).then(({ model, sha256 }) => ({ model, sha256 }));
+  }
+  return cachedTransformer;
 }
 
 async function readBoundedJson(request: Request): Promise<unknown> {
@@ -86,11 +98,21 @@ export async function POST(request: Request) {
   }
 
   try {
-    const generated = getModel().generate(tokenizer.encode(prompt, false), maxTokens);
+    const transformer = await getConfiguredTransformer();
+    if (transformer) {
+      const generated = transformer.model.generate(tokenizer.encode(prompt, false), maxTokens);
+      return NextResponse.json({
+        text: tokenizer.decode(generated).slice(0, 1200),
+        model: "Nexus Transformer (research checkpoint)",
+        modelSha256: transformer.sha256,
+        note: "Experimental self-trained Transformer. Checkpoint checksum verified at load; output quality depends on training data and evaluation.",
+      }, { headers: { "Cache-Control": "no-store" } });
+    }
+    const generated = getBaselineModel().generate(tokenizer.encode(prompt, false), maxTokens);
     return NextResponse.json({
       text: tokenizer.decode(generated).slice(0, 1200),
       model: "Nexus Bigram v0.1",
-      note: "Experimental baseline trained in-memory on a tiny seed corpus. Outputs are expected to be incoherent; this is a runtime smoke test, not a capable conversational model.",
+      note: "Experimental baseline trained in-memory on a tiny seed corpus. Outputs are expected to be incoherent; configure NEXUS_TRANSFORMER_CHECKPOINT with a trained checkpoint and matching .sha256 sidecar to use the Transformer.",
     }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ error: "The model could not generate a response." }, { status: 500 });

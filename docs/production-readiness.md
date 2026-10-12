@@ -12,13 +12,14 @@ Nexus is built around an original TypeScript model runtime. Production readiness
 - [ ] Establish a licensed, documented, deduplicated training corpus with enough data to measure generalization.
 - [ ] Implement and benchmark a causal transformer against the current MLP and bigram baselines.
 - [ ] Persist evaluation metrics and dataset/checkpoint provenance end-to-end.
-- [ ] Load a pinned, checksum-verified model artifact in the serving path; avoid training on every cold start.
+- [x] Load an explicitly configured Transformer checkpoint only after SHA-256 and byte-count verification; cache the verified model per Node.js process.
+- [ ] Provision a reviewed checkpoint artifact into the runtime and demonstrate improved held-out metrics before changing the default serving model.
 - [ ] Add request limits, timeout/memory protections, and production observability.
 - [ ] Pass an explicit release review before changing the production endpoint or deploying.
 
 ## Why we are not promoting the current model yet
 
-The checked-in seed corpus is only about 510 bytes. That is useful for smoke tests, but not a meaningful language-model training set. The current context MLP is a research baseline, not a conversational assistant. Its evaluation currently uses an ordered 80/10/10 byte split, while the dataset manifest uses stable content-hash splits over normalized lines; those are not interchangeable and must be unified before reporting release metrics.
+The checked-in seed corpus is only about 510 bytes. That is useful for smoke tests, but not a meaningful language-model training set. The current context MLP and single-block Transformer are research baselines, not conversational assistants. The API can serve an explicitly configured Transformer checkpoint after checksum verification, but the default remains the tiny bigram baseline until a real corpus and measured quality gains justify promotion. Its evaluation currently uses an ordered 80/10/10 byte split, while the dataset manifest uses stable content-hash splits over normalized lines; those are not interchangeable and must be unified before reporting release metrics.
 
 ## Release policy
 
