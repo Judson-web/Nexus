@@ -59,8 +59,7 @@ async function fetchPage(offset: number, length: number, timeoutMs: number): Pro
   url.searchParams.set("dataset", COMMON_PILE_ARXIV_ABSTRACTS.dataset);
   url.searchParams.set("config", COMMON_PILE_ARXIV_ABSTRACTS.config);
   url.searchParams.set("split", COMMON_PILE_ARXIV_ABSTRACTS.split);
-  url.searchParams.set("revision", COMMON_PILE_ARXIV_ABSTRACTS.revision);
-  url.searchParams.set("offset", String(offset));
+    url.searchParams.set("offset", String(offset));
   url.searchParams.set("length", String(length));
   const response = await fetch(url, {
     headers: { accept: "application/json", "user-agent": "Nexus-Corpus-Acquisition/1.0" },
@@ -101,7 +100,9 @@ async function main(): Promise<void> {
     if (page.length < pageLength) break;
   }
 
-  await verifyPinnedRevision(timeoutMs);\n\n  if (reviewed.accepted.length !== targetDocuments) {
+  await verifyPinnedRevision(timeoutMs);
+
+  if (reviewed.accepted.length !== targetDocuments) {
     throw new Error(`Bounded scan found only ${reviewed.accepted.length} of ${targetDocuments} eligible unique CC0 records after scanning ${rows.length} rows. Increase --max-rows; no data was written.`);
   }
   const splitCounts: Record<SourceSplit, number> = { train: 0, validation: 0, test: 0 };
