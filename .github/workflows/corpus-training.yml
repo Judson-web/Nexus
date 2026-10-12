@@ -98,10 +98,10 @@ jobs:
               const continuation = text.slice(prompt.length).trim();
               if (continuation.length < 20) throw new Error("Generation returned too little continuation: " + path);
               if (!/[A-Za-z]/.test(continuation)) throw new Error("Generation contains no readable Latin text: " + path);
-              if (/^(.)\\1{19,}$/s.test(continuation)) throw new Error("Generation collapsed to a repeated character: " + path);
+              if (new Set(continuation).size === 1) throw new Error("Generation collapsed to a repeated character: " + path);
               return { prompt, continuationCharacters: continuation.length, sample: text };
             });
-            writeFileSync("artifacts/generation-samples/summary.json", JSON.stringify({ selectedBy: "validation negative log-likelihood", qualityNote: "Automated checks establish non-empty text only; inspect samples for coherence and repetition before calling the model useful.", samples }, null, 2) + "\\n");
+            writeFileSync("artifacts/generation-samples/summary.json", JSON.stringify({ selectedBy: "validation negative log-likelihood", qualityNote: "Automated checks establish non-empty text only; inspect samples for coherence and repetition before calling the model useful.", samples }, null, 2) + "\n");
             console.log(JSON.stringify(samples.map(({ prompt, continuationCharacters }) => ({ prompt, continuationCharacters })), null, 2));
           '
       - uses: actions/upload-artifact@v4
