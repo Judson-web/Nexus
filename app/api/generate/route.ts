@@ -1,20 +1,18 @@
 import { NextResponse } from "next/server";
-import { loadVerifiedTransformerArtifact } from "../../../src/model/verified-transformer-artifact.js";
+import { loadVerifiedTransformerArtifact, type TransformerTokenizer } from "../../../src/model/verified-transformer-artifact.js";
 import type { TransformerModel } from "../../../src/model/transformer-model.js";
-import { ByteTokenizer } from "../../../src/tokenizer/byte-tokenizer.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 10;
 
 const MAX_BODY_BYTES = 4096;
-let cachedTransformer: Promise<{ model: TransformerModel; sha256: string }> | undefined;
-const tokenizer = new ByteTokenizer();
+let cachedTransformer: Promise<{ model: TransformerModel; tokenizer: TransformerTokenizer; sha256: string }> | undefined;
 
-async function getConfiguredTransformer(): Promise<{ model: TransformerModel; sha256: string } | undefined> {
+async function getConfiguredTransformer(): Promise<{ model: TransformerModel; tokenizer: TransformerTokenizer; sha256: string } | undefined> {
   const checkpointPath = process.env.NEXUS_TRANSFORMER_CHECKPOINT?.trim();
   if (!checkpointPath) return undefined;
   if (!cachedTransformer) {
-    cachedTransformer = loadVerifiedTransformerArtifact(checkpointPath).then(({ model, sha256 }) => ({ model, sha256 }));
+    cachedTransformer = loadVerifiedTransformerArtifact(checkpointPath).then(({ model, tokenizer, sha256 }) => ({ model, tokenizer, sha256 }));
   }
   return cachedTransformer;
 }
@@ -81,9 +79,9 @@ export async function POST(request: Request) {
   try {
     const transformer = await getConfiguredTransformer();
     if (transformer) {
-      const generated = transformer.model.generate(tokenizer.encode(prompt, false), maxTokens);
+      const generated = transformer.model.generate(transformer.tokenizer.encode(prompt, false), maxTokens);
       return NextResponse.json({
-        text: tokenizer.decode(generated).slice(0, 1200),
+        text: transformer.tokenizer.decode(generated).slice(0, 1200),
         model: "Nexus Transformer (research checkpoint)",
         modelSha256: transformer.sha256,
         note: "Experimental self-trained Transformer. Checkpoint checksum verified at load; output quality depends on training data and evaluation.",
