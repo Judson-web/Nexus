@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import { cpus, platform, arch } from "node:os";
 import { ByteTokenizer } from "../tokenizer/byte-tokenizer.js";
 import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel, type TransformerConfig } from "../model/transformer-model.js";
 
@@ -84,6 +85,13 @@ export async function profileTransformerTraining(
     dataset: {
       sourceSha256: createHash("sha256").update(source, "utf8").digest("hex"),
       tokenCount: tokens.length,
+    },
+    runtime: {
+      nodeVersion: process.version,
+      platform: platform(),
+      architecture: arch(),
+      cpuModel: cpus()[0]?.model ?? "unknown",
+      logicalCpuCount: cpus().length,
     },
     model: { family: "nexus-transformer", config, parameterCount, epochs, learningRate, repeats },
     profile: {
