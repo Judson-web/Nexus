@@ -25,7 +25,7 @@ async function main(): Promise<void> {
     return [split, {
       examples: examples.length,
       utf8Bytes,
-      encodedBytes,
+      encodedTokens,
       tokenToByteRatio: utf8Bytes === 0 ? 0 : encodedTokens / utf8Bytes,
       unicodeCodePoints: codePointLengths.reduce((sum, n) => sum + n, 0),
       tokensPerCodePoint: codePointLengths.reduce((sum, n) => sum + n, 0) === 0 ? 0 : encodedTokens / codePointLengths.reduce((sum, n) => sum + n, 0),
