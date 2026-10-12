@@ -34,6 +34,8 @@ jobs:
         run: npm run evaluate:transformer -- --epochs 1 --context-size 3 --embedding-size 4 --heads 2 --feed-forward-size 8 --learning-rate 0.0001
       - name: Verify Transformer training profiler
         run: npm run profile:transformer -- --epochs 1 --context-size 2 --embedding-size 4 --heads 2 --feed-forward-size 4 --learning-rate 0.0001
+      - name: Benchmark scalar and typed-array Transformer gradients
+        run: npm run benchmark:transformer-gradients -- --repeats 3 --warmups 1 --examples 4 --vocab-size 16 --context-size 3 --embedding-size 4 --heads 2 --feed-forward-size 8 --seed 101
       - name: Verify manifest-driven evaluation
         run: |
           mkdir -p /tmp/nexus-data
