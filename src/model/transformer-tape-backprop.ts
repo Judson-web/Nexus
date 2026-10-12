@@ -33,6 +33,7 @@ export function transformerTapeLossAndGradients(
   const pow = (a: number, exponent: number): number => tape.power(a, exponent);
   const exp = (a: number): number => tape.exponential(a);
   const tanh = (a: number): number => tape.hyperbolicTangent(a);
+  const log = (a: number): number => tape.logarithm(a);
   let offset = 0;
   const take = (length: number): number[] => {
     const result = params.slice(offset, offset + length);
@@ -128,13 +129,7 @@ export function transformerTapeLossAndGradients(
   for (const logit of logits) maxLogit = Math.max(maxLogit, tape.value(logit));
   let denominator = zero();
   for (const logit of logits) denominator = add(denominator, exp(sub(logit, constant(maxLogit))));
-  const loss = add(sub(constant(maxLogit), logits[target]!), tape.value(denominator) > 0
-    ? div(constant(1), constant(1)) // keeps branch structurally scalar; replaced below with log node-free stable CE
-    : zero());
-  // log(sum(exp(logits - max))) is the only missing primitive; use an equivalent
-  // softmax probability formulation's scalar log value while preserving its gradient.
-  const logDenominator = Math.log(tape.value(denominator));
-  const output = add(sub(constant(maxLogit), logits[target]!), add(constant(logDenominator), mul(denominator, constant(0))));
+  const output = add(sub(constant(maxLogit), logits[target]!), log(denominator));
   tape.backward(output);
   const gradients = Float64Array.from(params, (parameter) => tape.gradient(parameter));
   if (gradients.some((gradient) => !Number.isFinite(gradient))) {
