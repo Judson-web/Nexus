@@ -26,7 +26,6 @@ function pairKey(left: number, right: number): string {
  */
 export class BytePairTokenizer {
   private readonly merges: BytePairMerge[];
-  private readonly mergeRanks: Map<string, number>;
   private readonly expandedBytes = new Map<number, number[]>();
 
   public constructor(data?: BytePairTokenizerData) {
@@ -40,7 +39,6 @@ export class BytePairTokenizer {
       }
       return { left, right };
     });
-    this.mergeRanks = new Map(this.merges.map((merge, index) => [pairKey(merge.left, merge.right), index]));
   }
 
   public static train(texts: readonly string[], maxMerges = 256, minFrequency = 2): BytePairTokenizer {
