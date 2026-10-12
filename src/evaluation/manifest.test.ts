@@ -34,6 +34,32 @@ test("manifest evaluator trains only on train examples and reports held-out metr
   }
 });
 
+test("opt-in Transformer trains only on manifest train split and reports held-out metrics", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nexus-transformer-manifest-"));
+  const path = join(directory, "manifest.json");
+  try {
+    const corpus = Array.from({ length: 60 }, (_, i) => `training example number ${i} has enough bytes`).join("\n");
+    const manifest = prepareDataset(corpus, { seed: 31 });
+    await writeFile(path, JSON.stringify(manifest), "utf8");
+    const report = await evaluateDatasetManifest({
+      manifestPath: path,
+      epochs: 1,
+      seed: 9,
+      includeTransformer: true,
+    });
+    assert.equal(report.evaluations.length, 3);
+    const transformer = report.evaluations.find((item) => item.modelFamily === "nexus-transformer");
+    assert.ok(transformer);
+    assert.equal(transformer.validation.examples, manifest.splits.validation);
+    assert.equal(transformer.test.examples, manifest.splits.test);
+    assert.ok(Number.isFinite(transformer.validation.negativeLogLikelihood));
+    assert.ok(Number.isFinite(transformer.test.perplexity));
+    assert.equal(report.training.transformer?.trainedExamples, manifest.splits.train);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("manifest evaluator rejects split count tampering", async () => {
   const directory = await mkdtemp(join(tmpdir(), "nexus-manifest-eval-"));
   const path = join(directory, "manifest.json");
