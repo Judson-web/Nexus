@@ -1,19 +1,25 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
+import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
+import { ByteTokenizer } from "../tokenizer/byte-tokenizer.js";
 import { TransformerModel, type TransformerCheckpoint } from "./transformer-model.js";
 
 const MAX_CHECKPOINT_BYTES = 50 * 1024 * 1024;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
+export type TransformerTokenizer = ByteTokenizer | BytePairTokenizer;
+
 export interface VerifiedTransformerArtifact {
   readonly model: TransformerModel;
+  readonly tokenizer: TransformerTokenizer;
   readonly sha256: string;
   readonly bytes: number;
 }
 
 /**
  * Load a pinned research checkpoint only when its companion checksum matches.
- * The checksum sidecar is emitted by train:transformer:manifest.
+ * Tokenizer metadata is checkpoint-coupled: older byte checkpoints remain
+ * supported, while BPE checkpoints must include a valid merge table.
  */
 export async function loadVerifiedTransformerArtifact(
   checkpointPath: string,
@@ -29,7 +35,7 @@ export async function loadVerifiedTransformerArtifact(
     readFile(checkpointPath),
     readFile(`${checkpointPath}.sha256`, "utf8"),
   ]);
-  const match = /^([a-f0-9]{64})\s+(\d+)\s*$/.exec(sidecar);
+  const match = /^([a-f0-9]{64})\\s+(\\d+)\\s*$/.exec(sidecar);
   if (!match || !SHA256_PATTERN.test(match[1]!)) {
     throw new Error("Transformer checksum sidecar is malformed.");
   }
@@ -51,6 +57,17 @@ export async function loadVerifiedTransformerArtifact(
       parsed.version !== 1 || !("config" in parsed) || !("weights" in parsed)) {
     throw new Error("Transformer checkpoint has an unsupported format.");
   }
-  const model = TransformerModel.fromCheckpoint(parsed as TransformerCheckpoint);
-  return { model, sha256: actualSha256, bytes: bytes.byteLength };
+
+  const checkpoint = parsed as TransformerCheckpoint;
+  const model = TransformerModel.fromCheckpoint(checkpoint);
+  let tokenizer: TransformerTokenizer;
+  if (checkpoint.tokenizer !== undefined) {
+    tokenizer = new BytePairTokenizer(checkpoint.tokenizer);
+  } else {
+    tokenizer = new ByteTokenizer();
+  }
+  if (model.config.vocabSize !== ("vocabSize" in tokenizer ? tokenizer.vocabSize : 257)) {
+    throw new Error("Checkpoint model vocabulary does not match its embedded tokenizer.");
+  }
+  return { model, tokenizer, sha256: actualSha256, bytes: bytes.byteLength };
 }
