@@ -15,7 +15,7 @@ function parseArgs(args: string[]): Map<string, string> {
     const value = args[i + 1];
     if (!value || value.startsWith("--")) throw new Error(`Missing value for ${key}`);
     if (options.has(name)) throw new Error(`Duplicate option: ${key}`);
-    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "max-minutes", "max-tokens-per-example"].includes(name)) {
+    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
       throw new Error(`Unknown option: ${key}`);
     }
     options.set(name, value);
@@ -79,6 +79,8 @@ async function main(): Promise<void> {
   const learningRate = numeric(options, "learning-rate", 0.0001);
   const maxMinutes = numeric(options, "max-minutes", 30);
   const maxTokensPerExample = numeric(options, "max-tokens-per-example", 256);
+  const targetStride = numeric(options, "target-stride", 1);
+  if (!Number.isSafeInteger(targetStride) || targetStride < 1 || targetStride > 32) throw new RangeError("target-stride must be an integer between 1 and 32.");
   if (!Number.isSafeInteger(maxTokensPerExample) || maxTokensPerExample < 16 || maxTokensPerExample > 4096) throw new RangeError("max-tokens-per-example must be an integer between 16 and 4096.");
   if (maxMinutes <= 0 || maxMinutes > 300) throw new RangeError("max-minutes must be in (0, 300].");
   const deadline = Date.now() + maxMinutes * 60_000;
@@ -130,7 +132,7 @@ async function main(): Promise<void> {
     const metrics = model.train(tokens, learningRate, epochs, 1, optimizer, (progress) => {
       if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit during example ${exampleIndex}/${trainingExamples.length}.`);
       console.error(`[train] example ${exampleIndex}/${trainingExamples.length} epoch ${progress.epoch}/${progress.epochs}: ${progress.targetsProcessed}/${progress.totalTargets} targets; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
-    });
+    }, targetStride);
     weightedLoss += metrics.loss * metrics.examples;
     trainedTokens += metrics.examples;
     lastGradientNorm = metrics.gradientNorm;
@@ -169,6 +171,7 @@ async function main(): Promise<void> {
       tokenizer: { type: "train-only byte-pair", merges: tokenizer.toJSON().merges.length, vocabSize: tokenizer.vocabSize },
       trainedExamples: trainingExamples.length,
       maxTokensPerExample,
+      targetStride,
       truncatedExamples,
       trainedNextTokenTargets: trainedTokens,
       meanFinalTrainingLoss: weightedLoss / trainedTokens,
