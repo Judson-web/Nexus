@@ -16,6 +16,11 @@ test("Transformer profiler returns per-epoch loss and throughput with reproducib
       config: { contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 7 },
     });
     assert.equal(report.model.repeats, 2);
+    assert.equal(report.runtime.nodeVersion, process.version);
+    assert.ok(report.runtime.platform.length > 0);
+    assert.ok(report.runtime.architecture.length > 0);
+    assert.ok(report.runtime.logicalCpuCount > 0);
+    assert.ok(report.runtime.cpuModel.length > 0);
     assert.equal(report.profile.runs.length, 2);
     assert.equal(report.profile.runs[0]!.epochs.length, 2);
     assert.ok(Number.isFinite(report.profile.medianFinalLoss));
