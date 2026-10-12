@@ -1,5 +1,6 @@
 import { SeededRandom } from "../core/random.js";
 import { transformerLossAndGradients } from "./transformer-backprop.js";
+import type { BytePairTokenizerData } from "../tokenizer/byte-pair-tokenizer.js";
 
 export interface TransformerConfig {
   readonly vocabSize: number;
@@ -15,6 +16,7 @@ export interface TransformerCheckpoint {
   readonly version: 1;
   readonly config: TransformerConfig;
   readonly weights: number[];
+  readonly tokenizer?: BytePairTokenizerData;
 }
 
 export type TransformerOptimizer = "sgd" | "adam";
