@@ -9,12 +9,12 @@ on:
       documents:
         description: "Number of eligible CC0 abstracts to acquire (3-1000)"
         required: true
-        default: "200"
+        default: "300"
         type: string
       max_rows:
         description: "Maximum dataset-viewer rows to scan (100-20000)"
         required: true
-        default: "5000"
+        default: "20000"
         type: string
       epochs:
         description: "Training epochs per example (start small)"
@@ -43,52 +43,54 @@ jobs:
       - run: npm run check
       - run: npm test
       - name: Acquire bounded, provenance-checked CC0 corpus
-        run: npm run acquire:common-pile -- --documents "${{ inputs.documents || '200' }}" --max-rows "${{ inputs.max_rows || '5000' }}" --output artifacts/common-pile-arxiv-abstracts
+        run: npm run acquire:common-pile -- --documents "${{ inputs.documents || '300' }}" --max-rows "${{ inputs.max_rows || '20000' }}" --output artifacts/common-pile-arxiv-abstracts
       - name: Build split-preserving training manifest
         run: npm run prepare:dataset:source-splits -- --train artifacts/common-pile-arxiv-abstracts/train.txt --validation artifacts/common-pile-arxiv-abstracts/validation.txt --test artifacts/common-pile-arxiv-abstracts/test.txt --source-name "Common Pile arXiv abstracts" --source-url "https://huggingface.co/datasets/common-pile/arxiv_abstracts" --license "CC0 (record-level metadata checked; see acquisition manifest)" --attribution "Common Pile arXiv abstracts; source URLs and authors in acquisition manifest" --output artifacts/dataset-manifest.json
       - name: Audit tokenizer coverage and sequence lengths
         run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/dataset-manifest.json > artifacts/tokenizer-audit.json
-      - name: Run controlled Adam learning-rate sweep
+      - name: Train the first larger-corpus Transformer candidate
         run: |
           set -euo pipefail
-          # The previous sweep showed 0.0003 substantially improved held-out NLL.
-          # Spend the compute budget on more source documents instead of repeating a costly sweep.
-          for rate in 0.0003; do
-            label="${rate//./_}"
-            npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs || '1' }}" --seed "${{ inputs.seed || '17' }}" --optimizer adam --context-size 16 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate" --max-minutes 30 --max-tokens-per-example 192 --target-stride 2
-          done
-      - name: Verify checkpoints and rank experiments by validation only
+          npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-first-real-run.json" --epochs "${{ inputs.epochs || '1' }}" --seed "${{ inputs.seed || '17' }}" --optimizer adam --context-size 16 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate 0.0006 --max-minutes 35 --max-tokens-per-example 512 --target-stride 2
+      - name: Verify checkpoint and held-out metrics
         run: |
+          set -euo pipefail
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
             import { createHash } from "node:crypto";
             const manifest = JSON.parse(readFileSync("artifacts/dataset-manifest.json", "utf8"));
-            const rates = ["0_0003"];
-            const results = rates.map((rate) => {
-              const path = "artifacts/transformer-lr-" + rate + ".json";
-              const provenance = JSON.parse(readFileSync(path + ".provenance.json", "utf8"));
-              const checkpoint = readFileSync(path);
-              const digest = createHash("sha256").update(checkpoint).digest("hex");
-              if (provenance.checkpoint.sha256 !== digest) throw new Error("Checkpoint SHA-256 mismatch: " + rate);
-              if (provenance.dataset.validationAndTestUsedForTraining !== false) throw new Error("Held-out leakage flag invalid: " + rate);
-              if (provenance.training.optimizer !== "adam") throw new Error("Unexpected optimizer: " + rate);
-              if (provenance.training.trainedExamples !== manifest.splits.train) throw new Error("Training example count mismatch: " + rate);
-              for (const split of ["validation", "test"]) {
-                const score = provenance.heldOutEvaluation[split];
-                if (!Number.isFinite(score.negativeLogLikelihood) || !Number.isFinite(score.perplexity) || score.tokens < 1) throw new Error("Invalid held-out score: " + split + " / " + rate);
+            const path = "artifacts/transformer-first-real-run.json";
+            const provenance = JSON.parse(readFileSync(path + ".provenance.json", "utf8"));
+            const checkpoint = readFileSync(path);
+            const digest = createHash("sha256").update(checkpoint).digest("hex");
+            if (provenance.checkpoint.sha256 !== digest) throw new Error("Checkpoint SHA-256 mismatch");
+            if (provenance.dataset.validationAndTestUsedForTraining !== false) throw new Error("Held-out leakage flag invalid");
+            if (provenance.training.optimizer !== "adam") throw new Error("Unexpected optimizer");
+            if (provenance.training.trainedExamples !== manifest.splits.train) throw new Error("Training example count mismatch");
+            for (const split of ["validation", "test"]) {
+              const score = provenance.heldOutEvaluation[split];
+              if (!Number.isFinite(score.negativeLogLikelihood) || !Number.isFinite(score.perplexity) || score.tokens < 1) throw new Error("Invalid held-out score: " + split);
+            }
+            writeFileSync("artifacts/experiment-results.json", JSON.stringify({
+              selectionMetric: "validation negative log-likelihood; test is report-only",
+              modelSelectionPerformed: false,
+              experiment: {
+                learningRate: provenance.training.learningRate,
+                seed: provenance.training.seed,
+                epochs: provenance.training.epochsPerExample,
+                model: provenance.model,
+                training: provenance.training,
+                validation: provenance.heldOutEvaluation.validation,
+                test: provenance.heldOutEvaluation.test,
+                checkpointSha256: digest
               }
-              return { learningRate: provenance.training.learningRate, seed: provenance.training.seed, epochs: provenance.training.epochsPerExample, contextSize: provenance.model.contextSize, embeddingSize: provenance.model.embeddingSize, trainingLoss: provenance.training.meanFinalTrainingLoss, validation: provenance.heldOutEvaluation.validation, test: provenance.heldOutEvaluation.test, checkpointSha256: digest };
-            });
-            results.sort((a, b) => a.validation.negativeLogLikelihood - b.validation.negativeLogLikelihood);
-            writeFileSync("artifacts/experiment-results.json", JSON.stringify({ selectionMetric: "validation negative log-likelihood (test set not used for selection)", experiments: results }, null, 2) + "\n");
-            console.log(JSON.stringify({ acceptedExamples: manifest.acceptedExamples, splits: manifest.splits, selectionMetric: "validation negative log-likelihood (test set not used for selection)", experiments: results }, null, 2));
+            }, null, 2) + "\n");
+            console.log(JSON.stringify({ acceptedExamples: manifest.acceptedExamples, splits: manifest.splits, training: provenance.training, validation: provenance.heldOutEvaluation.validation, test: provenance.heldOutEvaluation.test, checkpointSha256: digest }, null, 2));
           '
-      - name: Generate samples from validation-selected checkpoint
+      - name: Generate samples and preserve diagnostics
         run: |
           set -euo pipefail
-          best_rate=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; const r = JSON.parse(readFileSync("artifacts/experiment-results.json", "utf8")); const rate = r.experiments[0]?.learningRate; if (!Number.isFinite(rate)) throw new Error("No validation-ranked checkpoint"); process.stdout.write(String(rate).replaceAll(".", "_"));')
-          checkpoint="artifacts/transformer-lr-${best_rate}.json"
-          test -s "$checkpoint"
+          checkpoint="artifacts/transformer-first-real-run.json"
           mkdir -p artifacts/generation-samples
           npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "The universe is" --tokens 120 > artifacts/generation-samples/universe.txt
           npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "In this paper, we present" --tokens 120 > artifacts/generation-samples/research.txt
@@ -105,23 +107,26 @@ jobs:
                 promptPreserved: text.startsWith(prompt),
                 continuationLongEnough: continuation.length >= 20,
                 containsReadableLatin: /[A-Za-z]/.test(continuation),
-                notSingleCharacterCollapse: continuation.length > 0 && new Set(continuation).size > 1,
+                notSingleCharacterCollapse: continuation.length > 0 && new Set(continuation).size > 1
               };
               return { prompt, continuationCharacters: continuation.length, checks, status: Object.values(checks).every(Boolean) ? "passed" : "warning", sample: text };
             });
             const qualityWarnings = samples.filter((sample) => sample.status !== "passed").map(({ prompt, checks }) => ({ prompt, checks }));
-            writeFileSync("artifacts/generation-samples/summary.json", JSON.stringify({ selectedBy: "validation negative log-likelihood", qualityNote: "Generation sanity checks are diagnostic. A short or empty continuation is preserved and flagged so the run can upload metrics and samples; this is not evidence of useful generation.", qualityWarnings, samples }, null, 2) + "\n");
+            writeFileSync("artifacts/generation-samples/summary.json", JSON.stringify({
+              qualityNote: "Diagnostic only; short or poor generation is retained and flagged, not treated as evidence of language competence.",
+              qualityWarnings, samples
+            }, null, 2) + "\n");
             console.log(JSON.stringify({ samples: samples.map(({ prompt, continuationCharacters, status, checks }) => ({ prompt, continuationCharacters, status, checks })), qualityWarnings }, null, 2));
           '
       - uses: actions/upload-artifact@v4
         with:
-          name: nexus-expanded-corpus-transformer-${{ github.run_id }}
+          name: nexus-first-real-training-${{ github.run_id }}
           path: |
             artifacts/common-pile-arxiv-abstracts/
             artifacts/dataset-manifest.json
-            artifacts/transformer-lr-*.json
-            artifacts/transformer-lr-*.json.sha256
-            artifacts/transformer-lr-*.json.provenance.json
+            artifacts/transformer-first-real-run.json
+            artifacts/transformer-first-real-run.json.sha256
+            artifacts/transformer-first-real-run.json.provenance.json
             artifacts/tokenizer-audit.json
             artifacts/experiment-results.json
             artifacts/generation-samples/
