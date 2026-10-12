@@ -72,46 +72,47 @@ export function transformerLossAndGradients(
   const tail = context.slice(-c);
   const padded = [...new Array<number>(c - tail.length).fill(0), ...tail];
   const states: Value[][] = [];
-  const qs: Value[][] = [];
   const ks: Value[][] = [];
   const vs: Value[][] = [];
+  let lastQuery: Value[] = [];
   for (let p = 0; p < c; p++) {
     const state = Array.from({ length: e }, (_, d) => token[padded[p]! * e + d]!.add(position[p * e + d]!));
     states.push(state);
-    qs.push(dotProjection(state, q, e));
+    if (p === c - 1) lastQuery = dotProjection(state, q, e);
     ks.push(dotProjection(state, k, e));
     vs.push(dotProjection(state, value, e));
   }
 
+  // Only the final position contributes to this next-token loss. Computing
+  // queries and attention outputs for earlier positions creates graph nodes
+  // that are never connected to the loss, so omit those dead computations.
   const headSize = e / headCount;
-  const attended: Value[][] = states.map(() => Array.from({ length: e }, zero));
-  for (let p = 0; p < c; p++) {
-    for (let h = 0; h < headCount; h++) {
-      const start = h * headSize;
-      const scores: Value[] = [];
-      for (let source = 0; source <= p; source++) {
-        let score = zero();
-        for (let d = 0; d < headSize; d++) {
-          score = score.add(qs[p]![start + d]!.mul(ks[source]![start + d]!));
-        }
-        scores.push(score.div(Math.sqrt(headSize)));
+  const last = c - 1;
+  const attended = Array.from({ length: e }, zero);
+  for (let h = 0; h < headCount; h++) {
+    const start = h * headSize;
+    const scores: Value[] = [];
+    for (let source = 0; source <= last; source++) {
+      let score = zero();
+      for (let d = 0; d < headSize; d++) {
+        score = score.add(lastQuery[start + d]!.mul(ks[source]![start + d]!));
       }
-      let max = Number.NEGATIVE_INFINITY;
-      for (const score of scores) max = Math.max(max, score.data);
-      const exponentials = scores.map((score) => score.sub(max).exp());
-      let denominator = zero();
-      for (const exponential of exponentials) denominator = denominator.add(exponential);
-      for (let source = 0; source <= p; source++) {
-        const probability = exponentials[source]!.div(denominator);
-        for (let d = 0; d < headSize; d++) {
-          attended[p]![start + d] = attended[p]![start + d]!.add(probability.mul(vs[source]![start + d]!));
-        }
+      scores.push(score.div(Math.sqrt(headSize)));
+    }
+    let max = Number.NEGATIVE_INFINITY;
+    for (const score of scores) max = Math.max(max, score.data);
+    const exponentials = scores.map((score) => score.sub(max).exp());
+    let denominator = zero();
+    for (const exponential of exponentials) denominator = denominator.add(exponential);
+    for (let source = 0; source <= last; source++) {
+      const probability = exponentials[source]!.div(denominator);
+      for (let d = 0; d < headSize; d++) {
+        attended[start + d] = attended[start + d]!.add(probability.mul(vs[source]![start + d]!));
       }
     }
   }
 
-  const last = c - 1;
-  const projected = dotProjection(attended[last]!, attentionOut, e);
+  const projected = dotProjection(attended, attentionOut, e);
   let state = normalize(states[last]!.map((x, i) => x.add(projected[i]!)), attentionScale, attentionBias);
   const hidden = Array.from({ length: f }, (_, j) => {
     let z = ff1Bias[j]!;
