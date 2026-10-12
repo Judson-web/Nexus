@@ -17,6 +17,7 @@
     "train:transformer": "tsx src/cli/transformer.ts train",
     "generate:transformer": "tsx src/cli/transformer.ts generate",
     "evaluate": "tsx src/cli/evaluate.ts",
+    "evaluate:transformer": "tsx src/cli/evaluate-transformer.ts",
     "prepare:dataset": "tsx src/cli/prepare-dataset.ts",
     "evaluate:manifest": "tsx src/cli/evaluate-manifest.ts"
   },
