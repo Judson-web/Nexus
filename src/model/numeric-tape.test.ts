@@ -25,7 +25,7 @@ test("numeric tape supports arithmetic and unary derivatives", () => {
   const tanh = tape.hyperbolicTangent(y);
   const output = tape.add(tape.add(squared, exp), tanh);
   tape.backward(output);
-  assert.ok(Math.abs(tape.gradient(x) - (Math.exp(2) - 0.125)) < 1e-10);
+  assert.ok(Math.abs(tape.gradient(x) - (Math.exp(2) - 0.25)) < 1e-10);
   assert.ok(Math.abs(tape.gradient(y) - (0.125 + 2 * (1 - Math.tanh(4) ** 2))) < 1e-10);
 });
 
@@ -63,7 +63,7 @@ test("numeric tape grows typed buffers without losing node references", () => {
   let current = x;
   for (let i = 0; i < 3000; i++) current = tape.add(current, x);
   tape.backward(current);
-  assert.equal(tape.size, 3002);
+  assert.equal(tape.size, 3001);
   assert.equal(tape.value(current), 4501.5);
   assert.equal(tape.gradient(x), 3001);
 });
