@@ -12,7 +12,7 @@ for (let index = 0; index < args.length; index += 1) {
   index += 1;
 }
 
-const allowed = new Set(["input", "epochs", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "seed"]);
+const allowed = new Set(["input", "epochs", "repeats", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "seed"]);
 for (const key of options.keys()) {
   if (!allowed.has(key)) throw new Error(`Unknown option: --${key}`);
 }
@@ -27,6 +27,7 @@ function numberOption(name: string, fallback: number): number {
 try {
   const report = await profileTransformerTraining(options.get("input") ?? "data/corpus.txt", {
     epochs: numberOption("epochs", 2),
+    repeats: numberOption("repeats", 1),
     learningRate: numberOption("learning-rate", 0.0001),
     config: {
       contextSize: numberOption("context-size", 3),
