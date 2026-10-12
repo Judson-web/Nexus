@@ -52,7 +52,7 @@ jobs:
           # Spend the compute budget on more source documents instead of repeating a costly sweep.
           for rate in 0.0003; do
             label="${rate//./_}"
-            npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs }}" --seed "${{ inputs.seed }}" --optimizer adam --context-size 8 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate"
+            npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs }}" --seed "${{ inputs.seed }}" --optimizer adam --context-size 32 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate"
           done
       - name: Verify checkpoints and rank experiments by validation only
         run: |
