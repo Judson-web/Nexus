@@ -34,3 +34,12 @@ test("autodiff rejects invalid operations and non-finite operands", () => {
   assert.throws(() => Value.of(1000).exp(), /overflow/i);
   assert.throws(() => Value.of(Number.NaN), /finite/i);
 });
+
+test("reverse mode handles deep graphs without recursive call-stack overflow", () => {
+  const x = Value.of(1);
+  let result = x;
+  for (let i = 0; i < 20_000; i += 1) result = result.add(1);
+  result.backward();
+  assert.equal(result.data, 20_001);
+  assert.equal(x.grad, 1);
+});
