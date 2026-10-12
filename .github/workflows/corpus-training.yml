@@ -6,12 +6,12 @@ on:
       documents:
         description: "Number of eligible CC0 abstracts to acquire (3-1000)"
         required: true
-        default: "200"
+        default: "1000"
         type: string
       max_rows:
         description: "Maximum dataset-viewer rows to scan (100-20000)"
         required: true
-        default: "5000"
+        default: "20000"
         type: string
       epochs:
         description: "Training epochs per example (start small)"
@@ -30,7 +30,7 @@ permissions:
 jobs:
   acquire-train-evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,7 +48,9 @@ jobs:
       - name: Run controlled Adam learning-rate sweep
         run: |
           set -euo pipefail
-          for rate in 0.0001 0.0003 0.0005; do
+          # The previous sweep showed 0.0003 substantially improved held-out NLL.
+          # Spend the compute budget on more source documents instead of repeating a costly sweep.
+          for rate in 0.0003; do
             label="${rate//./_}"
             npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs }}" --seed "${{ inputs.seed }}" --optimizer adam --context-size 8 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate"
           done
@@ -58,7 +60,7 @@ jobs:
             import { readFileSync, writeFileSync } from "node:fs";
             import { createHash } from "node:crypto";
             const manifest = JSON.parse(readFileSync("artifacts/dataset-manifest.json", "utf8"));
-            const rates = ["0_0001", "0_0003", "0_0005"];
+            const rates = ["0_0003"];
             const results = rates.map((rate) => {
               const path = "artifacts/transformer-lr-" + rate + ".json";
               const provenance = JSON.parse(readFileSync(path + ".provenance.json", "utf8"));
@@ -78,9 +80,35 @@ jobs:
             writeFileSync("artifacts/experiment-results.json", JSON.stringify({ selectionMetric: "validation negative log-likelihood (test set not used for selection)", experiments: results }, null, 2) + "\n");
             console.log(JSON.stringify({ acceptedExamples: manifest.acceptedExamples, splits: manifest.splits, selectionMetric: "validation negative log-likelihood (test set not used for selection)", experiments: results }, null, 2));
           '
+      - name: Generate samples from validation-selected checkpoint
+        run: |
+          set -euo pipefail
+          best_rate=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; const r = JSON.parse(readFileSync("artifacts/experiment-results.json", "utf8")); const rate = r.experiments[0]?.learningRate; if (!Number.isFinite(rate)) throw new Error("No validation-ranked checkpoint"); process.stdout.write(String(rate).replaceAll(".", "_"));')
+          checkpoint="artifacts/transformer-lr-${best_rate}.json"
+          test -s "$checkpoint"
+          mkdir -p artifacts/generation-samples
+          npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "The universe is" --tokens 120 > artifacts/generation-samples/universe.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "In this paper, we present" --tokens 120 > artifacts/generation-samples/research.txt
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const prompts = ["The universe is", "In this paper, we present"];
+            const files = ["artifacts/generation-samples/universe.txt", "artifacts/generation-samples/research.txt"];
+            const samples = files.map((path, index) => {
+              const text = readFileSync(path, "utf8");
+              const prompt = prompts[index];
+              if (!text.startsWith(prompt)) throw new Error("Generated sample lost its prompt: " + path);
+              const continuation = text.slice(prompt.length).trim();
+              if (continuation.length < 20) throw new Error("Generation returned too little continuation: " + path);
+              if (!/[A-Za-z]/.test(continuation)) throw new Error("Generation contains no readable Latin text: " + path);
+              if (new Set(continuation).size === 1) throw new Error("Generation collapsed to a repeated character: " + path);
+              return { prompt, continuationCharacters: continuation.length, sample: text };
+            });
+            writeFileSync("artifacts/generation-samples/summary.json", JSON.stringify({ selectedBy: "validation negative log-likelihood", qualityNote: "Automated checks establish non-empty text only; inspect samples for coherence and repetition before calling the model useful.", samples }, null, 2) + "\n");
+            console.log(JSON.stringify(samples.map(({ prompt, continuationCharacters }) => ({ prompt, continuationCharacters })), null, 2));
+          '
       - uses: actions/upload-artifact@v4
         with:
-          name: nexus-common-pile-transformer-${{ github.run_id }}
+          name: nexus-expanded-corpus-transformer-${{ github.run_id }}
           path: |
             artifacts/common-pile-arxiv-abstracts/
             artifacts/dataset-manifest.json
@@ -89,5 +117,6 @@ jobs:
             artifacts/transformer-lr-*.json.provenance.json
             artifacts/tokenizer-audit.json
             artifacts/experiment-results.json
+            artifacts/generation-samples/
           if-no-files-found: error
           retention-days: 14
