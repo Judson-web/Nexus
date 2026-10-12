@@ -75,7 +75,7 @@ export default function HomePage() {
             <div className="suggestions">{examples.map((example) => <button className="suggestion" type="button" key={example.prompt} onClick={() => setPrompt(example.prompt)}>{example.label}</button>)}</div>
           </div>
           <div className="form-actions">
-            <label className="token-control" htmlFor="tokens"><span>OUTPUT LENGTH</span><select id="tokens" value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))}><option value={40}>Short · 40</option><option value={80}>Medium · 80</option><option value={120}>Long · 120</option}<option value={160}>Max · 160</option></select></label>
+            <label className="token-control" htmlFor="tokens"><span>OUTPUT LENGTH</span><select id="tokens" value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))}><option value={40}>Short · 40</option><option value={80}>Medium · 80</option><option value={120}>Long · 120</option><option value={160}>Max · 160</option></select></label>
             <button className="generate" type="submit" disabled={!prompt.trim() || busy}>{busy ? <><span className="spinner" /> Generating…</> : <>Run inference <span aria-hidden="true">↗</span></>}</button>
           </div>
         </form>
