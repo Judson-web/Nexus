@@ -30,6 +30,8 @@ jobs:
       - run: npm run train:transformer -- --epochs 1 --context-size 3 --embedding-size 4 --heads 2 --feed-forward-size 8 --learning-rate 0.0001 --output /tmp/nexus-transformer-smoke.json
       - run: npm run generate:transformer -- --checkpoint /tmp/nexus-transformer-smoke.json --prompt "Nexus" --tokens 4
       - run: npm run evaluate -- --epochs 2
+      - name: Verify Transformer training profiler
+        run: npm run profile:transformer -- --epochs 1 --context-size 2 --embedding-size 4 --heads 2 --feed-forward-size 4 --learning-rate 0.0001
       - name: Verify manifest-driven evaluation
         run: |
           mkdir -p /tmp/nexus-data
