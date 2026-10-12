@@ -75,7 +75,7 @@ jobs:
               return { learningRate: provenance.training.learningRate, seed: provenance.training.seed, epochs: provenance.training.epochsPerExample, contextSize: provenance.model.contextSize, embeddingSize: provenance.model.embeddingSize, trainingLoss: provenance.training.meanFinalTrainingLoss, validation: provenance.heldOutEvaluation.validation, test: provenance.heldOutEvaluation.test, checkpointSha256: digest };
             });
             results.sort((a, b) => a.validation.negativeLogLikelihood - b.validation.negativeLogLikelihood);
-            writeFileSync("artifacts/experiment-results.json", JSON.stringify({ selectionMetric: "validation negative log-likelihood (test set not used for selection)", experiments: results }, null, 2) + "\\n");
+            writeFileSync("artifacts/experiment-results.json", JSON.stringify({ selectionMetric: "validation negative log-likelihood (test set not used for selection)", experiments: results }, null, 2) + "\n");
             console.log(JSON.stringify({ acceptedExamples: manifest.acceptedExamples, splits: manifest.splits, selectionMetric: "validation negative log-likelihood (test set not used for selection)", experiments: results }, null, 2));
           '
       - uses: actions/upload-artifact@v4
