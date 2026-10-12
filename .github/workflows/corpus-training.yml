@@ -43,26 +43,40 @@ jobs:
         run: npm run acquire:common-pile -- --documents "${{ inputs.documents }}" --max-rows "${{ inputs.max_rows }}" --output artifacts/common-pile-arxiv-abstracts
       - name: Build split-preserving training manifest
         run: npm run prepare:dataset:source-splits -- --train artifacts/common-pile-arxiv-abstracts/train.txt --validation artifacts/common-pile-arxiv-abstracts/validation.txt --test artifacts/common-pile-arxiv-abstracts/test.txt --source-name "Common Pile arXiv abstracts" --source-url "https://huggingface.co/datasets/common-pile/arxiv_abstracts" --license "CC0 (record-level metadata checked; see acquisition manifest)" --attribution "Common Pile arXiv abstracts; source URLs and authors in acquisition manifest" --output artifacts/dataset-manifest.json
-      - name: Train small in-house Transformer with Adam and score held-out splits
-        run: npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output artifacts/transformer-common-pile.json --epochs "${{ inputs.epochs }}" --seed "${{ inputs.seed }}" --optimizer adam --context-size 3 --embedding-size 4 --heads 2 --feed-forward-size 8 --learning-rate 0.0001
-      - name: Verify checkpoint provenance and held-out evaluation
+      - name: Audit tokenizer coverage and sequence lengths
+        run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/dataset-manifest.json > artifacts/tokenizer-audit.json
+      - name: Run controlled Adam learning-rate sweep
+        run: |
+          set -euo pipefail
+          for rate in 0.0001 0.0003 0.0005; do
+            label="${rate//./_}"
+            npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs }}" --seed "${{ inputs.seed }}" --optimizer adam --context-size 8 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate"
+          done
+      - name: Verify checkpoints and rank experiments by validation only
         run: |
           node --input-type=module -e '
-            import { readFileSync } from "node:fs";
+            import { readFileSync, writeFileSync } from "node:fs";
             import { createHash } from "node:crypto";
             const manifest = JSON.parse(readFileSync("artifacts/dataset-manifest.json", "utf8"));
-            const provenance = JSON.parse(readFileSync("artifacts/transformer-common-pile.json.provenance.json", "utf8"));
-            const checkpoint = readFileSync("artifacts/transformer-common-pile.json");
-            const digest = createHash("sha256").update(checkpoint).digest("hex");
-            if (provenance.checkpoint.sha256 !== digest) throw new Error("Checkpoint SHA-256 mismatch");
-            if (provenance.dataset.validationAndTestUsedForTraining !== false) throw new Error("Held-out leakage flag invalid");
-            if (provenance.training.optimizer !== "adam") throw new Error("Unexpected optimizer");
-            if (provenance.training.trainedExamples !== manifest.splits.train) throw new Error("Training example count mismatch");
-            for (const split of ["validation", "test"]) {
-              const score = provenance.heldOutEvaluation[split];
-              if (!Number.isFinite(score.negativeLogLikelihood) || !Number.isFinite(score.perplexity) || score.tokens < 1) throw new Error("Invalid held-out score: " + split);
-            }
-            console.log(JSON.stringify({ acceptedExamples: manifest.acceptedExamples, splits: manifest.splits, trainedExamples: provenance.training.trainedExamples, optimizer: provenance.training.optimizer, validation: provenance.heldOutEvaluation.validation, test: provenance.heldOutEvaluation.test, checkpointSha256: digest }, null, 2));
+            const rates = ["0_0001", "0_0003", "0_0005"];
+            const results = rates.map((rate) => {
+              const path = "artifacts/transformer-lr-" + rate + ".json";
+              const provenance = JSON.parse(readFileSync(path + ".provenance.json", "utf8"));
+              const checkpoint = readFileSync(path);
+              const digest = createHash("sha256").update(checkpoint).digest("hex");
+              if (provenance.checkpoint.sha256 !== digest) throw new Error("Checkpoint SHA-256 mismatch: " + rate);
+              if (provenance.dataset.validationAndTestUsedForTraining !== false) throw new Error("Held-out leakage flag invalid: " + rate);
+              if (provenance.training.optimizer !== "adam") throw new Error("Unexpected optimizer: " + rate);
+              if (provenance.training.trainedExamples !== manifest.splits.train) throw new Error("Training example count mismatch: " + rate);
+              for (const split of ["validation", "test"]) {
+                const score = provenance.heldOutEvaluation[split];
+                if (!Number.isFinite(score.negativeLogLikelihood) || !Number.isFinite(score.perplexity) || score.tokens < 1) throw new Error("Invalid held-out score: " + split + " / " + rate);
+              }
+              return { learningRate: provenance.training.learningRate, seed: provenance.training.seed, epochs: provenance.training.epochsPerExample, contextSize: provenance.model.contextSize, embeddingSize: provenance.model.embeddingSize, trainingLoss: provenance.training.meanFinalTrainingLoss, validation: provenance.heldOutEvaluation.validation, test: provenance.heldOutEvaluation.test, checkpointSha256: digest };
+            });
+            results.sort((a, b) => a.validation.negativeLogLikelihood - b.validation.negativeLogLikelihood);
+            writeFileSync("artifacts/experiment-results.json", JSON.stringify({ selectionMetric: "validation negative log-likelihood (test set not used for selection)", experiments: results }, null, 2) + "\n");
+            console.log(JSON.stringify({ acceptedExamples: manifest.acceptedExamples, splits: manifest.splits, selectionMetric: "validation negative log-likelihood (test set not used for selection)", experiments: results }, null, 2));
           '
       - uses: actions/upload-artifact@v4
         with:
@@ -70,8 +84,10 @@ jobs:
           path: |
             artifacts/common-pile-arxiv-abstracts/
             artifacts/dataset-manifest.json
-            artifacts/transformer-common-pile.json
-            artifacts/transformer-common-pile.json.sha256
-            artifacts/transformer-common-pile.json.provenance.json
+            artifacts/transformer-lr-*.json
+            artifacts/transformer-lr-*.json.sha256
+            artifacts/transformer-lr-*.json.provenance.json
+            artifacts/tokenizer-audit.json
+            artifacts/experiment-results.json
           if-no-files-found: error
           retention-days: 14
