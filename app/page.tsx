@@ -62,7 +62,7 @@ export default function HomePage() {
           <div><span className="kicker">01 / PLAYGROUND</span><h2 id="playground-title">Give it a starting point.</h2></div>
           <span className="runtime-chip"><i /> LOCAL MODEL</span>
         </div>
-        <p className="section-copy">Try a short prompt and inspect what the current baseline predicts next. This is an early experiment, not a general-purpose assistant.</p>
+        <p className="section-copy">Try a short prompt once a verified Transformer checkpoint has been trained and configured. Inference stays disabled until a real checkpoint is available; this is an early research project, not a general-purpose assistant.</p>
         <form onSubmit={generate}>
           <div className="field-heading">
             <label htmlFor="prompt">YOUR PROMPT</label>
