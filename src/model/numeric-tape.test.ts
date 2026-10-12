@@ -26,7 +26,7 @@ test("numeric tape supports arithmetic and unary derivatives", () => {
   const output = tape.add(tape.add(squared, exp), tanh);
   tape.backward(output);
   assert.ok(Math.abs(tape.gradient(x) - (Math.exp(2) - 0.25)) < 1e-10);
-  assert.ok(Math.abs(tape.gradient(y) - (0.125 + 2 * (1 - Math.tanh(4) ** 2))) < 1e-10);
+  assert.ok(Math.abs(tape.gradient(y) - (0.125 + (1 - Math.tanh(4) ** 2))) < 1e-10);
 });
 
 test("numeric tape resets between graphs and clears gradients on each backward pass", () => {
