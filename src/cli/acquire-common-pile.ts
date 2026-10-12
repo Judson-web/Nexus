@@ -41,6 +41,19 @@ function integerOption(options: Map<string, string>, name: string, fallback: num
   return value;
 }
 
+async function verifyPinnedRevision(timeoutMs: number): Promise<void> {
+  const response = await fetch(`https://huggingface.co/api/datasets/${COMMON_PILE_ARXIV_ABSTRACTS.dataset}`, {
+    headers: { accept: "application/json", "user-agent": "Nexus-Corpus-Acquisition/1.0" },
+    signal: AbortSignal.timeout(timeoutMs),
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`Could not verify upstream dataset revision (HTTP ${response.status}); refusing unpinned acquisition.`);
+  const metadata = await response.json() as { readonly sha?: unknown };
+  if (metadata.sha !== COMMON_PILE_ARXIV_ABSTRACTS.revision) {
+    throw new Error(`Upstream dataset HEAD does not match pinned revision ${COMMON_PILE_ARXIV_ABSTRACTS.revision}; observed ${String(metadata.sha)}. Refusing to acquire an unpinned dataset.`);
+  }
+}
+
 async function fetchPage(offset: number, length: number, timeoutMs: number): Promise<CommonPileRow[]> {
   const url = new URL("https://datasets-server.huggingface.co/rows");
   url.searchParams.set("dataset", COMMON_PILE_ARXIV_ABSTRACTS.dataset);
@@ -88,7 +101,7 @@ async function main(): Promise<void> {
     if (page.length < pageLength) break;
   }
 
-  if (reviewed.accepted.length !== targetDocuments) {
+  await verifyPinnedRevision(timeoutMs);\n\n  if (reviewed.accepted.length !== targetDocuments) {
     throw new Error(`Bounded scan found only ${reviewed.accepted.length} of ${targetDocuments} eligible unique CC0 records after scanning ${rows.length} rows. Increase --max-rows; no data was written.`);
   }
   const splitCounts: Record<SourceSplit, number> = { train: 0, validation: 0, test: 0 };
@@ -105,7 +118,7 @@ async function main(): Promise<void> {
     formatVersion: 1,
     dataset: COMMON_PILE_ARXIV_ABSTRACTS,
     retrieval: {
-      method: "Hugging Face datasets-server rows API",
+      method: "Hugging Face datasets-server rows API; Hub HEAD verified against pinned revision before and after acquisition",
       rowsScanned: rows.length,
       maxRows,
       targetDocuments,
