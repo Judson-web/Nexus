@@ -21,7 +21,8 @@
     "prepare:dataset": "tsx src/cli/prepare-dataset.ts",
     "evaluate:manifest": "tsx src/cli/evaluate-manifest.ts",
     "profile:transformer": "tsx src/cli/profile-transformer.ts",
-    "compare:transformer": "tsx src/cli/compare-transformer-profiles.ts"
+    "compare:transformer": "tsx src/cli/compare-transformer-profiles.ts",
+    "train:transformer:manifest": "tsx src/cli/train-transformer-manifest.ts"
   },
   "dependencies": {
     "next": "^15.5.0",
