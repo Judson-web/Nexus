@@ -120,27 +120,27 @@ export class NumericTape {
         case TapeOpcode.Input:
           break;
         case TapeOpcode.Add:
-          this.gradients[a] += gradient;
-          this.gradients[b] += gradient;
+          this.gradients[a] = this.gradients[a]! + gradient;
+          this.gradients[b] = this.gradients[b]! + gradient;
           break;
         case TapeOpcode.Subtract:
-          this.gradients[a] += gradient;
-          this.gradients[b] -= gradient;
+          this.gradients[a] = this.gradients[a]! + gradient;
+          this.gradients[b] = this.gradients[b]! - gradient;
           break;
         case TapeOpcode.Multiply:
-          this.gradients[a] += gradient * this.values[b]!;
-          this.gradients[b] += gradient * this.values[a]!;
+          this.gradients[a] = this.gradients[a]! + gradient * this.values[b]!;
+          this.gradients[b] = this.gradients[b]! + gradient * this.values[a]!;
           break;
         case TapeOpcode.Divide: {
           const denominator = this.values[b]!;
-          this.gradients[a] += gradient / denominator;
-          this.gradients[b] -= gradient * this.values[a]! / (denominator * denominator);
+          this.gradients[a] = this.gradients[a]! + gradient / denominator;
+          this.gradients[b] = this.gradients[b]! - gradient * this.values[a]! / (denominator * denominator);
           break;
         }
         case TapeOpcode.Power:
         case TapeOpcode.Exponential:
         case TapeOpcode.Tanh:
-          this.gradients[a] += gradient * this.auxiliary[node]!;
+          this.gradients[a] = this.gradients[a]! + gradient * this.auxiliary[node]!;
           break;
         default:
           throw new Error("Unknown numeric tape opcode.");
