@@ -17,6 +17,8 @@ export interface TransformerCheckpoint {
   readonly weights: number[];
 }
 
+export type TransformerOptimizer = "sgd" | "adam";
+
 export interface TransformerMetrics {
   readonly loss: number;
   readonly examples: number;
@@ -55,6 +57,9 @@ function checkInteger(value: number, name: string, min: number, max: number): vo
 export class TransformerModel {
   public readonly config: TransformerConfig;
   private readonly weights: Float64Array;
+  private readonly adamFirstMoment: Float64Array;
+  private readonly adamSecondMoment: Float64Array;
+  private adamStep = 0;
   private readonly ranges: Record<string, { start: number; length: number }>;
 
   public constructor(config: TransformerConfig = DEFAULT_TRANSFORMER_CONFIG, checkpoint?: Partial<TransformerCheckpoint>) {
@@ -105,6 +110,8 @@ export class TransformerModel {
         }
       }
     }
+    this.adamFirstMoment = new Float64Array(this.weights.length);
+    this.adamSecondMoment = new Float64Array(this.weights.length);
   }
 
   private vector(name: string): Float64Array {
@@ -226,10 +233,10 @@ export class TransformerModel {
   /**
    * Exact reverse-mode backpropagation through the complete single-block
    * Transformer. Per-example gradients are averaged for each epoch before a
-   * single SGD update. This reference implementation prioritizes correctness
+   * single optimizer update. This reference implementation prioritizes correctness
    * and gradient inspectability over training throughput.
    */
-  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1): TransformerMetrics {
+  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd"): TransformerMetrics {
     this.validateTokens(tokens);
     checkInteger(epochs, "epochs", 1, 1000);
     if (tokens.length < 2) throw new Error("At least two tokens are required.");
@@ -239,6 +246,7 @@ export class TransformerModel {
     if (!Number.isFinite(maxGradientNorm) || maxGradientNorm <= 0) {
       throw new RangeError("maxGradientNorm must be finite and positive.");
     }
+    if (optimizer !== "sgd" && optimizer !== "adam") throw new RangeError("optimizer must be sgd or adam.");
     const exampleCount = tokens.length - 1;
     let gradientNorm = 0;
     let gradientScale = 1;
@@ -266,9 +274,24 @@ export class TransformerModel {
       gradientNorm = Math.sqrt(squaredNorm);
       if (!Number.isFinite(gradientNorm)) throw new RangeError("Training produced a non-finite gradient norm.");
       gradientScale = gradientNorm > maxGradientNorm ? maxGradientNorm / gradientNorm : 1;
-      const scale = (learningRate / exampleCount) * gradientScale;
+      if (optimizer === "adam") this.adamStep += 1;
+      const beta1 = 0.9;
+      const beta2 = 0.999;
+      const epsilon = 1e-8;
+      const biasCorrection1 = 1 - beta1 ** this.adamStep;
+      const biasCorrection2 = 1 - beta2 ** this.adamStep;
       for (let p = 0; p < this.weights.length; p++) {
-        const update = scale * gradient[p]!;
+        const averagedGradient = (gradient[p]! / exampleCount) * gradientScale;
+        let update: number;
+        if (optimizer === "adam") {
+          this.adamFirstMoment[p] = beta1 * this.adamFirstMoment[p]! + (1 - beta1) * averagedGradient;
+          this.adamSecondMoment[p] = beta2 * this.adamSecondMoment[p]! + (1 - beta2) * averagedGradient * averagedGradient;
+          const first = this.adamFirstMoment[p]! / biasCorrection1;
+          const second = this.adamSecondMoment[p]! / biasCorrection2;
+          update = learningRate * first / (Math.sqrt(second) + epsilon);
+        } else {
+          update = learningRate * averagedGradient;
+        }
         if (!Number.isFinite(update)) throw new RangeError("Training produced a non-finite parameter update.");
         this.weights[p] = this.weights[p]! - update;
         if (!Number.isFinite(this.weights[p]!)) throw new RangeError("Training produced a non-finite parameter.");
