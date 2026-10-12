@@ -120,14 +120,8 @@ export async function evaluateDatasetManifest(options: ManifestEvaluationOptions
   }
 
   const evaluations = [
-    {
-      ...evaluate("nexus-bigram", (ctx) => bigram.probabilities(ctx.length ? ctx[ctx.length - 1]! : 0), 1),
-      training: { epochsPerExample: epochs, learningRate: 0.08 },
-    },
-    {
-      ...evaluate("nexus-context-mlp", (ctx) => context.probabilities(ctx), context.config.contextSize),
-      training: { epochsPerExample: epochs, learningRate: 0.03 },
-    },
+    evaluate("nexus-bigram", (ctx) => bigram.probabilities(ctx.length ? ctx[ctx.length - 1]! : 0), 1),
+    evaluate("nexus-context-mlp", (ctx) => context.probabilities(ctx), context.config.contextSize),
   ];
 
   let transformerTraining: { epochsPerExample: number; learningRate: number; trainedExamples: number; contextSize: number; embeddingSize: number; headCount: number; feedForwardSize: number } | undefined;
@@ -148,10 +142,7 @@ export async function evaluateDatasetManifest(options: ManifestEvaluationOptions
     for (const example of train) {
       transformer.train([...tokenizer.encode(example.text, false), EOS_TOKEN_ID], learningRate, epochs);
     }
-    evaluations.push({
-      ...evaluate("nexus-transformer", (ctx) => transformer.probabilities(ctx), config.contextSize),
-      training: { epochsPerExample: epochs, learningRate },
-    });
+    evaluations.push(evaluate("nexus-transformer", (ctx) => transformer.probabilities(ctx), config.contextSize));
     transformerTraining = {
       epochsPerExample: epochs,
       learningRate,
