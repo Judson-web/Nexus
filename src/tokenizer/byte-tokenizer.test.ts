@@ -13,3 +13,10 @@ test("encodes and decodes UTF-8 including non-ASCII text", () => {
 test("rejects invalid token IDs", () => {
   assert.throws(() => new ByteTokenizer().decode([257]), RangeError);
 });
+
+test("drops incomplete or invalid UTF-8 suffixes instead of rendering replacement characters", () => {
+  const tokenizer = new ByteTokenizer();
+  assert.equal(tokenizer.decode([72, 105, 0xf0, 0x9f]), "Hi");
+  assert.equal(tokenizer.decode([0xe2, 0x28, 0xa1]), "");
+  assert.equal(tokenizer.decode([72, 105, 0xf0, 0x9f, EOS_TOKEN_ID, 65]), "Hi");
+});
