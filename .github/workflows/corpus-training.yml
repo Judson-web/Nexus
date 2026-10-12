@@ -6,12 +6,12 @@ on:
       documents:
         description: "Number of eligible CC0 abstracts to acquire (3-1000)"
         required: true
-        default: "200"
+        default: "1000"
         type: string
       max_rows:
         description: "Maximum dataset-viewer rows to scan (100-20000)"
         required: true
-        default: "5000"
+        default: "20000"
         type: string
       epochs:
         description: "Training epochs per example (start small)"
@@ -30,7 +30,7 @@ permissions:
 jobs:
   acquire-train-evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,7 +48,9 @@ jobs:
       - name: Run controlled Adam learning-rate sweep
         run: |
           set -euo pipefail
-          for rate in 0.0001 0.0003 0.0005; do
+          # The previous sweep showed 0.0003 substantially improved held-out NLL.
+          # Spend the compute budget on more source documents instead of repeating a costly sweep.
+          for rate in 0.0003; do
             label="${rate//./_}"
             npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs }}" --seed "${{ inputs.seed }}" --optimizer adam --context-size 8 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate"
           done
@@ -58,7 +60,7 @@ jobs:
             import { readFileSync, writeFileSync } from "node:fs";
             import { createHash } from "node:crypto";
             const manifest = JSON.parse(readFileSync("artifacts/dataset-manifest.json", "utf8"));
-            const rates = ["0_0001", "0_0003", "0_0005"];
+            const rates = ["0_0003"];
             const results = rates.map((rate) => {
               const path = "artifacts/transformer-lr-" + rate + ".json";
               const provenance = JSON.parse(readFileSync(path + ".provenance.json", "utf8"));
@@ -106,7 +108,7 @@ jobs:
           '
       - uses: actions/upload-artifact@v4
         with:
-          name: nexus-common-pile-transformer-${{ github.run_id }}
+          name: nexus-expanded-corpus-transformer-${{ github.run_id }}
           path: |
             artifacts/common-pile-arxiv-abstracts/
             artifacts/dataset-manifest.json
