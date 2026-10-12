@@ -15,7 +15,7 @@ function parseArgs(args: string[]): Map<string, string> {
     const value = args[i + 1];
     if (!value || value.startsWith("--")) throw new Error(`Missing value for ${key}`);
     if (options.has(name)) throw new Error(`Duplicate option: ${key}`);
-    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "max-minutes"].includes(name)) {
+    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "max-minutes", "max-tokens-per-example"].includes(name)) {
       throw new Error(`Unknown option: ${key}`);
     }
     options.set(name, value);
@@ -78,6 +78,8 @@ async function main(): Promise<void> {
   const seed = numeric(options, "seed", 17);
   const learningRate = numeric(options, "learning-rate", 0.0001);
   const maxMinutes = numeric(options, "max-minutes", 30);
+  const maxTokensPerExample = numeric(options, "max-tokens-per-example", 256);
+  if (!Number.isSafeInteger(maxTokensPerExample) || maxTokensPerExample < 16 || maxTokensPerExample > 4096) throw new RangeError("max-tokens-per-example must be an integer between 16 and 4096.");
   if (maxMinutes <= 0 || maxMinutes > 300) throw new RangeError("max-minutes must be in (0, 300].");
   const deadline = Date.now() + maxMinutes * 60_000;
   const optimizer = options.get("optimizer") ?? "adam";
@@ -105,6 +107,7 @@ async function main(): Promise<void> {
   const model = new TransformerModel(modelConfig);
   let weightedLoss = 0;
   let trainedTokens = 0;
+  let truncatedExamples = 0;
   let lastGradientNorm = 0;
   let lastGradientScale = 1;
 
@@ -115,7 +118,13 @@ async function main(): Promise<void> {
   for (const example of trainingExamples) {
     exampleIndex += 1;
     if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit before example ${exampleIndex}/${trainingExamples.length}.`);
-    const tokens = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
+    let tokens = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
+    if (tokens.length > maxTokensPerExample) {
+      // Keep a deterministic prefix and restore EOS so each bounded training
+      // sequence has a valid terminal target rather than a random cut-off.
+      tokens = [...tokens.slice(0, maxTokensPerExample - 1), EOS_TOKEN_ID];
+      truncatedExamples += 1;
+    }
     if (tokens.length < 2) continue;
     console.error(`[train] example ${exampleIndex}/${trainingExamples.length}; targets=${tokens.length - 1}; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
     const metrics = model.train(tokens, learningRate, epochs, 1, optimizer, (progress) => {
@@ -159,6 +168,8 @@ async function main(): Promise<void> {
       seed, epochsPerExample: epochs, learningRate, optimizer,
       tokenizer: { type: "train-only byte-pair", merges: tokenizer.toJSON().merges.length, vocabSize: tokenizer.vocabSize },
       trainedExamples: trainingExamples.length,
+      maxTokensPerExample,
+      truncatedExamples,
       trainedNextTokenTargets: trainedTokens,
       meanFinalTrainingLoss: weightedLoss / trainedTokens,
       lastGradientNorm, lastGradientScale,
