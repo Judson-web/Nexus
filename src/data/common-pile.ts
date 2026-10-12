@@ -43,12 +43,12 @@ export function sha256(value: string): string {
 }
 
 export function normalizeAbstract(value: string): string {
-  return value.normalize("NFC").replace(/\\s+/gu, " ").trim();
+  return value.normalize("NFC").replace(/\s+/gu, " ").trim();
 }
 
 export function isExplicitCc0Row(row: CommonPileRow): boolean {
   return row.metadata.license?.trim() === COMMON_PILE_ARXIV_ABSTRACTS.license
-    && /^https?:\\/\\/(?:www\\.)?arxiv\\.org\\/abs\\/[a-zA-Z0-9.\\-/]+$/.test(row.metadata.url ?? "")
+    && /^https?:\/\/(?:www\.)?arxiv\.org\/abs\/[a-zA-Z0-9.\-/]+$/.test(row.metadata.url ?? "")
     && row.id.trim().length > 0
     && row.source === "arxiv-abstracts"
     && normalizeAbstract(row.text).length >= 80;
