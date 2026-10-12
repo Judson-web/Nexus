@@ -10,6 +10,7 @@ export interface TransformerProfileOptions {
   readonly learningRate?: number;
   readonly repeats?: number;
   readonly targetStride?: number;
+  readonly optimizer?: "sgd" | "adam";
   readonly config?: Partial<TransformerConfig>;
 }
 
@@ -28,6 +29,10 @@ export async function profileTransformerTraining(
   const targetStride = options.targetStride ?? 1;
   if (!Number.isSafeInteger(targetStride) || targetStride < 1 || targetStride > 32) {
     throw new RangeError("targetStride must be an integer between 1 and 32.");
+  }
+  const optimizer = options.optimizer ?? "sgd";
+  if (optimizer !== "sgd" && optimizer !== "adam") {
+    throw new RangeError("optimizer must be sgd or adam.");
   }
   const repeats = options.repeats ?? 1;
   if (!Number.isSafeInteger(repeats) || repeats < 1 || repeats > 20) {
@@ -56,7 +61,7 @@ export async function profileTransformerTraining(
     const epochMetrics: { epoch: number; loss: number; durationMs: number; examplesPerSecond: number; targetsProcessed: number; targetsPerSecond: number }[] = [];
     for (let epoch = 1; epoch <= epochs; epoch += 1) {
       const started = performance.now();
-      const metrics = model.train(tokens, learningRate, 1, 1, "sgd", undefined, targetStride);
+      const metrics = model.train(tokens, learningRate, 1, 1, optimizer, undefined, targetStride);
       const durationMs = performance.now() - started;
       epochMetrics.push({
         epoch,
@@ -103,7 +108,7 @@ export async function profileTransformerTraining(
       cpuModel: cpus()[0]?.model ?? "unknown",
       logicalCpuCount: cpus().length,
     },
-    model: { family: "nexus-transformer", config, parameterCount, epochs, learningRate, repeats, targetStride },
+    model: { family: "nexus-transformer", config, parameterCount, epochs, learningRate, optimizer, repeats, targetStride },
     profile: {
       totalDurationMs,
       meanEpochDurationMs,
