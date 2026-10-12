@@ -60,6 +60,24 @@ Once the candidate passes review:
 
 ## Decision record
 
-Status: **candidate identified; record-level source and license review not yet complete**.
+Status: **pinned candidate implemented; acquisition and local record audit remain to be run**.
 
-The next acceptable evidence is a committed source-selection record listing the exact upstream revision, license evidence, selected document IDs, split method, and size cap. Only then should the corpus be acquired and trained.
+The initial candidate is `common-pile/arxiv_abstracts`, configuration `default`, upstream split `train`, pinned to dataset revision `828e35d1000f94579da8850f5f640c138279bdb5`. The dataset viewer exposes record-level `metadata.license`, authors, and arXiv abstract URL; the acquisition code accepts only rows whose license string exactly matches the CC0 1.0 public-domain dedication and whose source/URL metadata matches the expected arXiv abstract collection. It does not ingest full paper text. The license declaration is evidence from the dataset metadata, not an independent legal opinion.
+
+Run `npm run acquire:common-pile -- --documents 200 --max-rows 5000` to create a bounded, local-only candidate corpus under `artifacts/common-pile-arxiv-abstracts/`. It records selected source IDs, URLs, authors, per-record license strings, text hashes, split assignments, and hashes in a manifest/JSONL audit file. The command fails closed if it cannot retrieve the requested number of eligible unique records or if all three splits are not represented. Do not commit the acquired text by default.
+
+Then create the trainer's source-split manifest using the generated files and explicit attribution:
+
+```sh
+npm run prepare:dataset:source-splits -- \
+  --train artifacts/common-pile-arxiv-abstracts/train.txt \
+  --validation artifacts/common-pile-arxiv-abstracts/validation.txt \
+  --test artifacts/common-pile-arxiv-abstracts/test.txt \
+  --source-name common-pile/arxiv_abstracts \
+  --source-url https://huggingface.co/datasets/common-pile/arxiv_abstracts \
+  --license CC0-1.0-record-level-metadata-filtered \
+  --attribution "Common Pile project and authors credited per record" \
+  --output artifacts/common-pile-arxiv-abstracts/dataset-manifest.json
+```
+
+Review the resulting `records.jsonl` and `manifest.json` before training. Confirm source IDs are unique, the source revision remains available, split counts are sensible, and the source/processed hashes are stable. The first run should stay bounded; the selected abstracts are a provenance-first experiment corpus, not a claim of broad language coverage.
