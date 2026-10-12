@@ -1,4 +1,5 @@
 import { SeededRandom } from "../core/random.js";
+import { transformerLossAndGradients } from "./transformer-backprop.js";
 
 export interface TransformerConfig {
   readonly vocabSize: number;
@@ -220,9 +221,10 @@ export class TransformerModel {
   }
 
   /**
-   * SPSA trains the complete parameter vector using paired perturbations.
-   * This is computationally expensive and intentionally limited to small
-   * experiments until exact backpropagation is implemented.
+   * Exact reverse-mode backpropagation through the complete single-block
+   * Transformer. Per-example gradients are averaged for each epoch before a
+   * single SGD update. This reference implementation prioritizes correctness
+   * and gradient inspectability over training throughput.
    */
   public train(tokens: readonly number[], learningRate = 0.002, epochs = 1): TransformerMetrics {
     this.validateTokens(tokens);
@@ -231,42 +233,35 @@ export class TransformerModel {
     if (!Number.isFinite(learningRate) || learningRate <= 0 || learningRate > 0.02) {
       throw new RangeError("learningRate must be in (0, 0.02].");
     }
-    if (this.weights.length > 100_000) throw new RangeError("SPSA training is limited to 100000 parameters.");
-    const random = new SeededRandom(this.config.seed + tokens.length + epochs);
-    const perturbation = new Float64Array(this.weights.length);
+    const exampleCount = tokens.length - 1;
     const gradient = new Float64Array(this.weights.length);
-    const original = new Float64Array(this.weights.length);
-    const lossFor = (start: number, end: number): number => {
-      let loss = 0;
-      let count = 0;
-      for (let i = start; i < end; i++) {
-        const probs = this.forward(tokens.slice(Math.max(0, i - this.config.contextSize), i));
-        loss -= Math.log(Math.max(Number.MIN_VALUE, probs[tokens[i]!]!));
-        count++;
-      }
-      return loss / Math.max(1, count);
-    };
     let loss = 0;
-    let examples = 0;
     for (let epoch = 0; epoch < epochs; epoch++) {
-      const before = Math.max(1e-4, 0.05 / Math.sqrt(epoch + 1));
-      for (let i = 0; i < this.weights.length; i++) {
-        original[i] = this.weights[i]!;
-        perturbation[i] = random.next() < 0.5 ? -1 : 1;
-        this.weights[i] = original[i]! + before * perturbation[i]!;
+      gradient.fill(0);
+      loss = 0;
+      for (let i = 1; i < tokens.length; i++) {
+        const context = tokens.slice(Math.max(0, i - this.config.contextSize), i);
+        const result = transformerLossAndGradients(this.config, this.weights, context, tokens[i]!);
+        loss += result.loss;
+        for (let p = 0; p < gradient.length; p++) {
+          gradient[p] = gradient[p]! + result.gradients[p]!;
+        }
       }
-      const plus = lossFor(1, tokens.length);
-      for (let i = 0; i < this.weights.length; i++) this.weights[i] = original[i]! - before * perturbation[i]!;
-      const minus = lossFor(1, tokens.length);
-      const scale = (plus - minus) / (2 * before);
-      for (let i = 0; i < this.weights.length; i++) {
-        gradient[i] = scale * perturbation[i]!;
-        this.weights[i] = original[i]! - learningRate * gradient[i]!;
+      const scale = learningRate / exampleCount;
+      for (let p = 0; p < this.weights.length; p++) {
+        const update = scale * gradient[p]!;
+        if (!Number.isFinite(update)) throw new RangeError("Training produced a non-finite parameter update.");
+        this.weights[p] = this.weights[p]! - update;
+        if (!Number.isFinite(this.weights[p]!)) throw new RangeError("Training produced a non-finite parameter.");
       }
-      loss = lossFor(1, tokens.length);
-      examples = tokens.length - 1;
     }
-    return { loss, examples };
+    // Report the loss after the final epoch, not the pre-update objective.
+    loss = 0;
+    for (let i = 1; i < tokens.length; i++) {
+      const probabilities = this.forward(tokens.slice(Math.max(0, i - this.config.contextSize), i));
+      loss -= Math.log(Math.max(Number.MIN_VALUE, probabilities[tokens[i]!]!));
+    }
+    return { loss: loss / exampleCount, examples: exampleCount };
   }
 
   public generate(prompt: readonly number[], maxTokens: number, random: () => number = Math.random): number[] {
