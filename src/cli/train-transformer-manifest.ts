@@ -38,6 +38,37 @@ async function writeAtomic(path: string, content: string): Promise<void> {
   await rename(temporaryPath, path);
 }
 
+function scoreSplit(
+  examples: readonly { readonly text: string }[],
+  model: TransformerModel,
+  tokenizer: ByteTokenizer,
+  contextSize: number,
+) {
+  let totalNegativeLogLikelihood = 0;
+  let tokens = 0;
+  for (const example of examples) {
+    const sequence = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
+    for (let i = 0; i < sequence.length; i += 1) {
+      const context = sequence.slice(Math.max(0, i - contextSize), i);
+      const probabilities = model.probabilities(context);
+      const probability = probabilities[sequence[i]!]!;
+      if (!Number.isFinite(probability) || probability <= 0) {
+        throw new Error("Model returned an invalid probability while scoring a held-out split.");
+      }
+      totalNegativeLogLikelihood -= Math.log(probability);
+      tokens += 1;
+    }
+  }
+  if (tokens === 0) throw new Error("Cannot score an empty dataset split.");
+  const negativeLogLikelihood = totalNegativeLogLikelihood / tokens;
+  return {
+    examples: examples.length,
+    tokens,
+    negativeLogLikelihood,
+    perplexity: Math.exp(Math.min(negativeLogLikelihood, 700)),
+  };
+}
+
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const manifestPath = options.get("manifest") ?? "artifacts/dataset-manifest.json";
@@ -114,7 +145,7 @@ async function main(): Promise<void> {
   await writeAtomic(outputPath, checkpointContent);
   await writeAtomic(`${outputPath}.sha256`, `${checkpointSha256}  ${checkpointBytes.length}\n`);
   await writeAtomic(`${outputPath}.provenance.json`, JSON.stringify(provenance, null, 2) + "\n");
-  console.log(JSON.stringify({ outputPath, checkpointSha256, provenancePath: `${outputPath}.provenance.json`, ...provenance.training }, null, 2));
+  console.log(JSON.stringify({ outputPath, checkpointSha256, provenancePath: `${outputPath}.provenance.json`, ...provenance.training, heldOutEvaluation }, null, 2));
 }
 
 main().catch((error: unknown) => {
