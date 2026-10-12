@@ -128,14 +128,19 @@ async function main(): Promise<void> {
     warning: "Research-only acquisition. Each selected record declares CC0 in source metadata; review upstream provenance and legal suitability before redistribution or production use. This subset contains abstracts, not full papers.",
   };
 
-  await mkdir(outputDirectory, { recursive: true });
-  for (const split of ["train", "validation", "test"] as const) {
-    const path = join(outputDirectory, `${split}.txt`);
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, bySplit[split].join("\n") + "\n", { encoding: "utf8", flag: "wx" });
+  await mkdir(dirname(outputDirectory), { recursive: true });
+  const stagingDirectory = await mkdtemp(`${outputDirectory}.staging-`);
+  try {
+    for (const split of ["train", "validation", "test"] as const) {
+      await writeFile(join(stagingDirectory, `${split}.txt`), bySplit[split].join("\n") + "\n", "utf8");
+    }
+    await writeFile(join(stagingDirectory, "records.jsonl"), records, "utf8");
+    await writeFile(join(stagingDirectory, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n", "utf8");
+    await rename(stagingDirectory, outputDirectory);
+  } catch (error) {
+    await rm(stagingDirectory, { recursive: true, force: true });
+    throw error;
   }
-  await writeFile(join(outputDirectory, "records.jsonl"), records, { encoding: "utf8", flag: "wx" });
-  await writeFile(join(outputDirectory, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
   console.log(JSON.stringify({
     outputDirectory,
     dataset: COMMON_PILE_ARXIV_ABSTRACTS.dataset,
