@@ -38,7 +38,7 @@ test("opt-in Transformer trains only on manifest train split and reports held-ou
   const directory = await mkdtemp(join(tmpdir(), "nexus-transformer-manifest-"));
   const path = join(directory, "manifest.json");
   try {
-    const corpus = Array.from({ length: 60 }, (_, i) => `x${i}`).join("\n");
+    const corpus = Array.from({ length: 60 }, (_, i) => `training example number ${i} has enough bytes`).join("\n");
     const manifest = prepareDataset(corpus, { seed: 31 });
     await writeFile(path, JSON.stringify(manifest), "utf8");
     const report = await evaluateDatasetManifest({
