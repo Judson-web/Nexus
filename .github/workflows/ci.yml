@@ -40,4 +40,6 @@ jobs:
           for i in $(seq 1 120); do echo "Nexus dataset sample $i supports repeatable training and evaluation."; done > /tmp/nexus-data/corpus.txt
           npm run prepare:dataset -- --input /tmp/nexus-data/corpus.txt --output /tmp/nexus-data/manifest.json --seed 17
           npm run evaluate:manifest -- --manifest /tmp/nexus-data/manifest.json --epochs 1 --seed 17
+          npm run train:transformer:manifest -- --manifest /tmp/nexus-data/manifest.json --output /tmp/nexus-data/transformer.json --epochs 1 --context-size 2 --embedding-size 4 --heads 2 --feed-forward-size 4 --learning-rate 0.0001
+          node -e "const fs=require('node:fs'); const p=JSON.parse(fs.readFileSync('/tmp/nexus-data/transformer.json.provenance.json','utf8')); if(p.dataset.validationAndTestUsedForTraining!==false || !p.checkpoint.sha256 || p.training.trainedExamples!==p.dataset.splitCounts.train) process.exit(1)"
       - run: npm run build
