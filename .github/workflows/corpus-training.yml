@@ -1,6 +1,9 @@
 name: Nexus bounded corpus training
 
 on:
+  push:
+    branches:
+      - "training/**"
   workflow_dispatch:
     inputs:
       documents:
@@ -40,7 +43,7 @@ jobs:
       - run: npm run check
       - run: npm test
       - name: Acquire bounded, provenance-checked CC0 corpus
-        run: npm run acquire:common-pile -- --documents "${{ inputs.documents }}" --max-rows "${{ inputs.max_rows }}" --output artifacts/common-pile-arxiv-abstracts
+        run: npm run acquire:common-pile -- --documents "${{ inputs.documents || '200' }}" --max-rows "${{ inputs.max_rows || '5000' }}" --output artifacts/common-pile-arxiv-abstracts
       - name: Build split-preserving training manifest
         run: npm run prepare:dataset:source-splits -- --train artifacts/common-pile-arxiv-abstracts/train.txt --validation artifacts/common-pile-arxiv-abstracts/validation.txt --test artifacts/common-pile-arxiv-abstracts/test.txt --source-name "Common Pile arXiv abstracts" --source-url "https://huggingface.co/datasets/common-pile/arxiv_abstracts" --license "CC0 (record-level metadata checked; see acquisition manifest)" --attribution "Common Pile arXiv abstracts; source URLs and authors in acquisition manifest" --output artifacts/dataset-manifest.json
       - name: Audit tokenizer coverage and sequence lengths
@@ -52,7 +55,7 @@ jobs:
           # Spend the compute budget on more source documents instead of repeating a costly sweep.
           for rate in 0.0003; do
             label="${rate//./_}"
-            npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs }}" --seed "${{ inputs.seed }}" --optimizer adam --context-size 16 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate" --max-minutes 30 --max-tokens-per-example 192 --target-stride 2
+            npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs || '1' }}" --seed "${{ inputs.seed || '17' }}" --optimizer adam --context-size 16 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate" --max-minutes 30 --max-tokens-per-example 192 --target-stride 2
           done
       - name: Verify checkpoints and rank experiments by validation only
         run: |
