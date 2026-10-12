@@ -51,11 +51,11 @@ jobs:
       - name: Run controlled Adam learning-rate sweep
         run: |
           set -euo pipefail
-          # The previous sweep showed 0.0003 substantially improved held-out NLL.
-          # Spend the compute budget on more source documents instead of repeating a costly sweep.
-          for rate in 0.0003; do
+          # The first run trained successfully but used only one rate and truncated 148/178
+          # training examples at 192 tokens. Test three rates with a 512-token cap.
+          for rate in 0.0001 0.0003 0.0006; do
             label="${rate//./_}"
-            npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs || '1' }}" --seed "${{ inputs.seed || '17' }}" --optimizer adam --context-size 16 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate" --max-minutes 30 --max-tokens-per-example 192 --target-stride 2
+            npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-lr-${label}.json" --epochs "${{ inputs.epochs || '1' }}" --seed "${{ inputs.seed || '17' }}" --optimizer adam --context-size 16 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate "$rate" --max-minutes 30 --max-tokens-per-example 512 --target-stride 2
           done
       - name: Verify checkpoints and rank experiments by validation only
         run: |
@@ -63,7 +63,7 @@ jobs:
             import { readFileSync, writeFileSync } from "node:fs";
             import { createHash } from "node:crypto";
             const manifest = JSON.parse(readFileSync("artifacts/dataset-manifest.json", "utf8"));
-            const rates = ["0_0003"];
+            const rates = ["0_0001", "0_0003", "0_0006"];
             const results = rates.map((rate) => {
               const path = "artifacts/transformer-lr-" + rate + ".json";
               const provenance = JSON.parse(readFileSync(path + ".provenance.json", "utf8"));
@@ -73,11 +73,12 @@ jobs:
               if (provenance.dataset.validationAndTestUsedForTraining !== false) throw new Error("Held-out leakage flag invalid: " + rate);
               if (provenance.training.optimizer !== "adam") throw new Error("Unexpected optimizer: " + rate);
               if (provenance.training.trainedExamples !== manifest.splits.train) throw new Error("Training example count mismatch: " + rate);
+              if (provenance.training.maxTokensPerExample !== 512) throw new Error("Unexpected training token cap: " + rate);
               for (const split of ["validation", "test"]) {
                 const score = provenance.heldOutEvaluation[split];
                 if (!Number.isFinite(score.negativeLogLikelihood) || !Number.isFinite(score.perplexity) || score.tokens < 1) throw new Error("Invalid held-out score: " + split + " / " + rate);
               }
-              return { learningRate: provenance.training.learningRate, seed: provenance.training.seed, epochs: provenance.training.epochsPerExample, contextSize: provenance.model.contextSize, embeddingSize: provenance.model.embeddingSize, trainingLoss: provenance.training.meanFinalTrainingLoss, validation: provenance.heldOutEvaluation.validation, test: provenance.heldOutEvaluation.test, checkpointSha256: digest };
+              return { learningRate: provenance.training.learningRate, seed: provenance.training.seed, epochs: provenance.training.epochsPerExample, contextSize: provenance.model.contextSize, embeddingSize: provenance.model.embeddingSize, maxTokensPerExample: provenance.training.maxTokensPerExample, truncatedExamples: provenance.training.truncatedExamples, trainingLoss: provenance.training.meanFinalTrainingLoss, validation: provenance.heldOutEvaluation.validation, test: provenance.heldOutEvaluation.test, checkpointSha256: digest };
             });
             results.sort((a, b) => a.validation.negativeLogLikelihood - b.validation.negativeLogLikelihood);
             writeFileSync("artifacts/experiment-results.json", JSON.stringify({ selectionMetric: "validation negative log-likelihood (test set not used for selection)", experiments: results }, null, 2) + "\n");
