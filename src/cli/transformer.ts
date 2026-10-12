@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { ByteTokenizer } from "../tokenizer/byte-tokenizer.js";
+import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
 import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel } from "../model/transformer-model.js";
 
 function optionsFromArgs(args: string[]): Map<string, string> {
@@ -57,9 +58,13 @@ async function main(): Promise<void> {
   if (command === "generate") {
     const checkpoint = JSON.parse(await readFile(required(options, "checkpoint"), "utf8")) as Parameters<typeof TransformerModel.fromCheckpoint>[0];
     const model = TransformerModel.fromCheckpoint(checkpoint);
+    const generationTokenizer = checkpoint.tokenizer ? new BytePairTokenizer(checkpoint.tokenizer) : tokenizer;
+    if (generationTokenizer instanceof BytePairTokenizer && generationTokenizer.vocabSize !== model.config.vocabSize) {
+      throw new Error("Checkpoint tokenizer vocabulary does not match model configuration.");
+    }
     const prompt = required(options, "prompt");
-    const generated = model.generate(tokenizer.encode(prompt, false), numeric(options, "tokens", 80));
-    console.log(tokenizer.decode(generated));
+    const generated = model.generate(generationTokenizer.encode(prompt, false), numeric(options, "tokens", 80));
+    console.log(generationTokenizer.decode(generated));
     return;
   }
 
