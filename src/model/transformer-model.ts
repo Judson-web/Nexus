@@ -20,6 +20,10 @@ export interface TransformerCheckpoint {
 export interface TransformerMetrics {
   readonly loss: number;
   readonly examples: number;
+  /** L2 norm of the averaged gradient before clipping. */
+  readonly gradientNorm: number;
+  /** Multiplier applied to the averaged gradient (1 means no clipping). */
+  readonly gradientScale: number;
 }
 
 export const DEFAULT_TRANSFORMER_CONFIG: TransformerConfig = {
@@ -225,14 +229,19 @@ export class TransformerModel {
    * single SGD update. This reference implementation prioritizes correctness
    * and gradient inspectability over training throughput.
    */
-  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1): TransformerMetrics {
+  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1): TransformerMetrics {
     this.validateTokens(tokens);
     checkInteger(epochs, "epochs", 1, 1000);
     if (tokens.length < 2) throw new Error("At least two tokens are required.");
     if (!Number.isFinite(learningRate) || learningRate <= 0 || learningRate > 0.02) {
       throw new RangeError("learningRate must be in (0, 0.02].");
     }
+    if (!Number.isFinite(maxGradientNorm) || maxGradientNorm <= 0) {
+      throw new RangeError("maxGradientNorm must be finite and positive.");
+    }
     const exampleCount = tokens.length - 1;
+    let gradientNorm = 0;
+    let gradientScale = 1;
     const gradient = new Float64Array(this.weights.length);
     let loss = 0;
     for (let epoch = 0; epoch < epochs; epoch++) {
@@ -246,7 +255,18 @@ export class TransformerModel {
           gradient[p] = gradient[p]! + result.gradients[p]!;
         }
       }
-      const scale = learningRate / exampleCount;
+      // Clip the global L2 norm after averaging across examples. This keeps
+      // the update direction intact while bounding unusually large updates.
+      let squaredNorm = 0;
+      for (let p = 0; p < gradient.length; p++) {
+        const averaged = gradient[p]! / exampleCount;
+        if (!Number.isFinite(averaged)) throw new RangeError("Training produced a non-finite gradient.");
+        squaredNorm += averaged * averaged;
+      }
+      gradientNorm = Math.sqrt(squaredNorm);
+      if (!Number.isFinite(gradientNorm)) throw new RangeError("Training produced a non-finite gradient norm.");
+      gradientScale = gradientNorm > maxGradientNorm ? maxGradientNorm / gradientNorm : 1;
+      const scale = (learningRate / exampleCount) * gradientScale;
       for (let p = 0; p < this.weights.length; p++) {
         const update = scale * gradient[p]!;
         if (!Number.isFinite(update)) throw new RangeError("Training produced a non-finite parameter update.");
@@ -260,7 +280,7 @@ export class TransformerModel {
       const probabilities = this.forward(tokens.slice(Math.max(0, i - this.config.contextSize), i));
       loss -= Math.log(Math.max(Number.MIN_VALUE, probabilities[tokens[i]!]!));
     }
-    return { loss: loss / exampleCount, examples: exampleCount };
+    return { loss: loss / exampleCount, examples: exampleCount, gradientNorm, gradientScale };
   }
 
   public generate(prompt: readonly number[], maxTokens: number, random: () => number = Math.random): number[] {
