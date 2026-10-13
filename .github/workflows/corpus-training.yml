@@ -6,16 +6,6 @@ on:
       - "training/**"
   workflow_dispatch:
     inputs:
-      train_rows:
-        description: "Maximum OASST1 training rows to scan (100-20000)"
-        required: true
-        default: "5000"
-        type: string
-      validation_rows:
-        description: "OASST1 validation rows to scan (100-4401)"
-        required: true
-        default: "4401"
-        type: string
       epochs:
         description: "Training epochs per example (start small)"
         required: true
@@ -47,7 +37,7 @@ jobs:
       - run: npm run check
       - run: npm test
       - name: Acquire pinned, license-verified OASST1 conversations
-        run: npm run acquire:oasst1 -- --train-rows "${{ inputs.train_rows || '5000' }}" --validation-rows "${{ inputs.validation_rows || '4401' }}" --output artifacts/oasst1
+        run: npm run acquire:oasst1 -- --output artifacts/oasst1
       - name: Build conversation training manifest with isolated splits
         run: npm run prepare:dataset:source-splits -- --train artifacts/oasst1/train.txt --validation artifacts/oasst1/validation.txt --test artifacts/oasst1/test.txt --source-name "OpenAssistant Conversations Dataset (OASST1)" --source-url "https://huggingface.co/datasets/OpenAssistant/oasst1/tree/fdf72ae0827c1cda404aff25b6603abec9e3399b" --license "Apache-2.0" --attribution "OpenAssistant contributors, OASST1, Apache-2.0; see LICENSE and acquisition manifest" --output artifacts/dataset-manifest.json
       - name: Audit tokenizer coverage and sequence lengths
