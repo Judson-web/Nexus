@@ -1,5 +1,6 @@
 import { SeededRandom } from "../core/random.js";
 import { transformerLossAndGradients } from "./transformer-backprop.js";
+import { transformerTapeLossAndGradients } from "./transformer-tape-backprop.js";
 import type { BytePairTokenizerData } from "../tokenizer/byte-pair-tokenizer.js";
 
 export interface TransformerConfig {
@@ -26,6 +27,7 @@ export interface TransformerCheckpoint {
 }
 
 export type TransformerOptimizer = "sgd" | "adam";
+export type TransformerGradientBackend = "scalar" | "tape";
 
 export interface TransformerMetrics {
   readonly loss: number;
@@ -257,7 +259,7 @@ export class TransformerModel {
    * single optimizer update. This reference implementation prioritizes correctness
    * and gradient inspectability over training throughput.
    */
-  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void, targetStride = 1, targetStartIndex = 1): TransformerMetrics {
+  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void, targetStride = 1, targetStartIndex = 1, gradientBackend: TransformerGradientBackend = "scalar"): TransformerMetrics {
     this.validateTokens(tokens);
     checkInteger(epochs, "epochs", 1, 1000);
     if (tokens.length < 2) throw new Error("At least two tokens are required.");
@@ -268,6 +270,7 @@ export class TransformerModel {
       throw new RangeError("maxGradientNorm must be finite and positive.");
     }
     if (optimizer !== "sgd" && optimizer !== "adam") throw new RangeError("optimizer must be sgd or adam.");
+    if (gradientBackend !== "scalar" && gradientBackend !== "tape") throw new RangeError("gradientBackend must be scalar or tape.");
     checkInteger(targetStride, "targetStride", 1, 32);
     checkInteger(targetStartIndex, "targetStartIndex", 1, tokens.length - 1);
     const targetIndices: number[] = [];
@@ -284,7 +287,9 @@ export class TransformerModel {
       for (let targetIndex = 0; targetIndex < targetIndices.length; targetIndex++) {
         const i = targetIndices[targetIndex]!;
         const context = tokens.slice(Math.max(0, i - this.config.contextSize), i);
-        const result = transformerLossAndGradients(this.config, this.weights, context, tokens[i]!);
+        const result = gradientBackend === "tape"
+          ? transformerTapeLossAndGradients(this.config, this.weights, context, tokens[i]!)
+          : transformerLossAndGradients(this.config, this.weights, context, tokens[i]!);
         loss += result.loss;
         for (let p = 0; p < gradient.length; p++) {
           gradient[p] = gradient[p]! + result.gradients[p]!;
