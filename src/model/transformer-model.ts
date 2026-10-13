@@ -8,6 +8,8 @@ export interface TransformerConfig {
   readonly embeddingSize: number;
   readonly headCount: number;
   readonly feedForwardSize: number;
+  /** Number of independently parameterized decoder blocks. Legacy checkpoints default to one. */
+  readonly layerCount?: number;
   readonly seed: number;
 }
 
@@ -38,6 +40,7 @@ export const DEFAULT_TRANSFORMER_CONFIG: TransformerConfig = {
   embeddingSize: 16,
   headCount: 2,
   feedForwardSize: 32,
+  layerCount: 2,
   seed: 101,
 };
 
@@ -75,20 +78,28 @@ export class TransformerModel {
       throw new RangeError("embeddingSize must be divisible by headCount.");
     }
     checkInteger(config.feedForwardSize, "feedForwardSize", 4, 128);
+    const layerCount = config.layerCount ?? 1;
+    checkInteger(layerCount, "layerCount", 1, 8);
     if (!Number.isSafeInteger(config.seed)) throw new RangeError("seed must be a safe integer.");
-    this.config = { ...config };
+    this.config = { ...config, layerCount };
     const e = config.embeddingSize;
     const v = config.vocabSize;
     const c = config.contextSize;
     const f = config.feedForwardSize;
-    const sizes: Record<string, number> = {
-      token: v * e, position: c * e,
+    const sizes: Record<string, number> = { token: v * e, position: c * e };
+    const layerSizes: Record<string, number> = {
       q: e * e, k: e * e, value: e * e, attentionOut: e * e,
       attentionNormScale: e, attentionNormBias: e,
       ff1: e * f, ff1Bias: f, ff2: f * e, ff2Bias: e,
       ffNormScale: e, ffNormBias: e,
-      lmHead: e * v, lmBias: v,
     };
+    for (let layer = 0; layer < layerCount; layer++) {
+      for (const [name, size] of Object.entries(layerSizes)) {
+        sizes[layerCount === 1 ? name : `layer${layer}.${name}`] = size;
+      }
+    }
+    sizes.lmHead = e * v;
+    sizes.lmBias = v;
     this.ranges = {};
     let length = 0;
     for (const [name, size] of Object.entries(sizes)) {
@@ -104,7 +115,7 @@ export class TransformerModel {
       const random = new SeededRandom(config.seed);
       this.weights = new Float64Array(length);
       for (const [name, range] of Object.entries(this.ranges)) {
-        const scale = name === "attentionNormScale" || name === "ffNormScale" ? 0 : 1 / Math.sqrt(Math.max(1, e));
+        const scale = name.endsWith("attentionNormScale") || name.endsWith("ffNormScale") ? 0 : 1 / Math.sqrt(Math.max(1, e));
         for (let i = 0; i < range.length; i++) {
           this.weights[range.start + i] = name === "attentionNormScale" || name === "ffNormScale"
             ? 1
@@ -152,84 +163,80 @@ export class TransformerModel {
     return out;
   }
 
+  private layerVector(name: string, layer: number): Float64Array {
+    return this.vector(this.config.layerCount === 1 ? name : `layer${layer}.${name}`);
+  }
+
   private forward(context: readonly number[]): Float64Array {
     const { vocabSize: v, contextSize: c, embeddingSize: e, headCount } = this.config;
+    const layerCount = this.config.layerCount ?? 1;
     const padded = new Array<number>(c).fill(0);
     const tail = context.slice(-c);
     padded.splice(c - tail.length, tail.length, ...tail);
     const tokenEmbedding = this.vector("token");
     const positionEmbedding = this.vector("position");
-    const qMatrix = this.vector("q");
-    const kMatrix = this.vector("k");
-    const valueMatrix = this.vector("value");
-    const headSize = e / headCount;
-    const states: Float64Array[] = [];
-    const qs: Float64Array[] = [];
-    const ks: Float64Array[] = [];
-    const vs: Float64Array[] = [];
+    let states: Float64Array[] = [];
     for (let p = 0; p < c; p++) {
-      const state = new Float64Array(e);
-      for (let d = 0; d < e; d++) state[d] = tokenEmbedding[padded[p]! * e + d]! + positionEmbedding[p * e + d]!;
-      states.push(state);
-      const project = (matrix: Float64Array) => {
+      states.push(Float64Array.from({ length: e }, (_, d) => tokenEmbedding[padded[p]! * e + d]! + positionEmbedding[p * e + d]!));
+    }
+    const headSize = e / headCount;
+    for (let layer = 0; layer < layerCount; layer++) {
+      const qMatrix = this.layerVector("q", layer);
+      const kMatrix = this.layerVector("k", layer);
+      const valueMatrix = this.layerVector("value", layer);
+      const project = (state: Float64Array, matrix: Float64Array) => {
         const out = new Float64Array(e);
         for (let i = 0; i < e; i++) for (let j = 0; j < e; j++) out[j] = out[j]! + state[i]! * matrix[i * e + j]!;
         return out;
       };
-      qs.push(project(qMatrix)); ks.push(project(kMatrix)); vs.push(project(valueMatrix));
-    }
-
-    const attended = states.map(() => new Float64Array(e));
-    for (let p = 0; p < c; p++) {
-      for (let h = 0; h < headCount; h++) {
-        const start = h * headSize;
-        const scores: number[] = [];
-        for (let source = 0; source <= p; source++) {
-          let dot = 0;
-          for (let d = 0; d < headSize; d++) dot += qs[p]![start + d]! * ks[source]![start + d]!;
-          scores.push(dot / Math.sqrt(headSize));
-        }
-        const max = Math.max(...scores);
-        const exp = scores.map((score) => Math.exp(score - max));
-        const sum = exp.reduce((a, b) => a + b, 0);
-        for (let source = 0; source <= p; source++) {
-          const probability = exp[source]! / sum;
-          for (let d = 0; d < headSize; d++) {
-            attended[p]![start + d] = attended[p]![start + d]! + probability * vs[source]![start + d]!;
+      const qs = states.map((state) => project(state, qMatrix));
+      const ks = states.map((state) => project(state, kMatrix));
+      const vs = states.map((state) => project(state, valueMatrix));
+      const attended = states.map(() => new Float64Array(e));
+      for (let p = 0; p < c; p++) {
+        for (let h = 0; h < headCount; h++) {
+          const start = h * headSize;
+          const scores: number[] = [];
+          for (let source = 0; source <= p; source++) {
+            let dot = 0;
+            for (let d = 0; d < headSize; d++) dot += qs[p]![start + d]! * ks[source]![start + d]!;
+            scores.push(dot / Math.sqrt(headSize));
+          }
+          const max = Math.max(...scores);
+          const exp = scores.map((score) => Math.exp(score - max));
+          const sum = exp.reduce((a, b) => a + b, 0);
+          for (let source = 0; source <= p; source++) {
+            const probability = exp[source]! / sum;
+            for (let d = 0; d < headSize; d++) attended[p]![start + d] = attended[p]![start + d]! + probability * vs[source]![start + d]!;
           }
         }
       }
+      const outMatrix = this.layerVector("attentionOut", layer);
+      const attentionScale = this.layerVector("attentionNormScale", layer);
+      const attentionBias = this.layerVector("attentionNormBias", layer);
+      const ff1 = this.layerVector("ff1", layer);
+      const ff1Bias = this.layerVector("ff1Bias", layer);
+      const ff2 = this.layerVector("ff2", layer);
+      const ff2Bias = this.layerVector("ff2Bias", layer);
+      const ffScale = this.layerVector("ffNormScale", layer);
+      const ffBias = this.layerVector("ffNormBias", layer);
+      states = states.map((state, p) => {
+        const projected = project(attended[p]!, outMatrix);
+        let normalized = this.normalize(Float64Array.from(state, (x, i) => x + projected[i]!), attentionScale, attentionBias);
+        const hidden = new Float64Array(this.config.feedForwardSize);
+        for (let i = 0; i < e; i++) for (let j = 0; j < hidden.length; j++) hidden[j] = hidden[j]! + normalized[i]! * ff1[i * hidden.length + j]!;
+        for (let j = 0; j < hidden.length; j++) {
+          const z = hidden[j]! + ff1Bias[j]!;
+          hidden[j] = 0.5 * z * (1 + Math.tanh(Math.sqrt(2 / Math.PI) * (z + 0.044715 * z ** 3)));
+        }
+        const ffOutput = new Float64Array(e);
+        for (let i = 0; i < hidden.length; i++) for (let j = 0; j < e; j++) ffOutput[j] = ffOutput[j]! + hidden[i]! * ff2[i * e + j]!;
+        for (let j = 0; j < e; j++) ffOutput[j] = ffOutput[j]! + ff2Bias[j]!;
+        normalized = this.normalize(Float64Array.from(normalized, (x, i) => x + ffOutput[i]!), ffScale, ffBias);
+        return normalized;
+      });
     }
-
-    const outMatrix = this.vector("attentionOut");
-    const attentionScale = this.vector("attentionNormScale");
-    const attentionBias = this.vector("attentionNormBias");
-    const ff1 = this.vector("ff1");
-    const ff1Bias = this.vector("ff1Bias");
-    const ff2 = this.vector("ff2");
-    const ff2Bias = this.vector("ff2Bias");
-    const ffScale = this.vector("ffNormScale");
-    const ffBias = this.vector("ffNormBias");
-    const last = c - 1;
-    let state = states[last]!;
-    const projected = new Float64Array(e);
-    for (let i = 0; i < e; i++) for (let j = 0; j < e; j++) projected[j] = projected[j]! + attended[last]![i]! * outMatrix[i * e + j]!;
-    state = this.normalize(Float64Array.from(state, (x, i) => x + projected[i]!), attentionScale, attentionBias);
-    const hidden = new Float64Array(this.config.feedForwardSize);
-    for (let i = 0; i < e; i++) for (let j = 0; j < hidden.length; j++) {
-      const z = state[i]! * ff1[i * hidden.length + j]!;
-      hidden[j] = hidden[j]! + z;
-    }
-    for (let j = 0; j < hidden.length; j++) {
-      const z = hidden[j]! + ff1Bias[j]!;
-      hidden[j] = 0.5 * z * (1 + Math.tanh(Math.sqrt(2 / Math.PI) * (z + 0.044715 * z ** 3)));
-    }
-    const ffOutput = new Float64Array(e);
-    for (let i = 0; i < hidden.length; i++) for (let j = 0; j < e; j++) {
-      ffOutput[j] = ffOutput[j]! + hidden[i]! * ff2[i * e + j]!;
-    }
-    for (let j = 0; j < e; j++) ffOutput[j] = ffOutput[j]! + ff2Bias[j]!;
-    state = this.normalize(Float64Array.from(state, (x, i) => x + ffOutput[i]!), ffScale, ffBias);
+    const state = states[c - 1]!;
     const head = this.vector("lmHead");
     const bias = this.vector("lmBias");
     const logits = new Float64Array(v);
