@@ -17,6 +17,8 @@ export interface TransformerCheckpoint {
   readonly config: TransformerConfig;
   readonly weights: number[];
   readonly tokenizer?: BytePairTokenizerData;
+  /** Optional Adam state enables faithful optimizer continuation across runs. */
+  readonly optimizerState?: { readonly step: number; readonly firstMoment: number[]; readonly secondMoment: number[] };
 }
 
 export type TransformerOptimizer = "sgd" | "adam";
@@ -112,8 +114,24 @@ export class TransformerModel {
         }
       }
     }
-    this.adamFirstMoment = new Float64Array(this.weights.length);
-    this.adamSecondMoment = new Float64Array(this.weights.length);
+    const optimizerState = checkpoint?.optimizerState;
+    if (optimizerState !== undefined) {
+      if (!Number.isSafeInteger(optimizerState.step) || optimizerState.step < 0
+        || !Array.isArray(optimizerState.firstMoment) || !Array.isArray(optimizerState.secondMoment)
+        || optimizerState.firstMoment.length !== this.weights.length
+        || optimizerState.secondMoment.length !== this.weights.length
+        || optimizerState.firstMoment.some((x) => !Number.isFinite(x))
+        || optimizerState.secondMoment.some((x) => !Number.isFinite(x))
+        || optimizerState.secondMoment.some((x) => x < 0)) {
+        throw new Error("Checkpoint Adam optimizer state is malformed.");
+      }
+      this.adamStep = optimizerState.step;
+      this.adamFirstMoment = Float64Array.from(optimizerState.firstMoment);
+      this.adamSecondMoment = Float64Array.from(optimizerState.secondMoment);
+    } else {
+      this.adamFirstMoment = new Float64Array(this.weights.length);
+      this.adamSecondMoment = new Float64Array(this.weights.length);
+    }
   }
 
   private vector(name: string): Float64Array {
@@ -350,7 +368,17 @@ export class TransformerModel {
   }
 
   public toCheckpoint(): TransformerCheckpoint {
-    return { format: "nexus-transformer", version: 1, config: { ...this.config }, weights: Array.from(this.weights) };
+    return {
+      format: "nexus-transformer",
+      version: 1,
+      config: { ...this.config },
+      weights: Array.from(this.weights),
+      optimizerState: {
+        step: this.adamStep,
+        firstMoment: Array.from(this.adamFirstMoment),
+        secondMoment: Array.from(this.adamSecondMoment),
+      },
+    };
   }
 
   public static fromCheckpoint(checkpoint: TransformerCheckpoint): TransformerModel {
