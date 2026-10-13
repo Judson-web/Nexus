@@ -161,6 +161,13 @@ export class TransformerModel {
     return Float64Array.from(input, (x, i) => x * inverse * scale[i]! + bias[i]!);
   }
 
+  private normalizeLegacy(input: Float64Array, scale: Float64Array, bias: Float64Array): Float64Array {
+    const mean = input.reduce((sum, x) => sum + x, 0) / input.length;
+    const variance = input.reduce((sum, x) => sum + (x - mean) ** 2, 0) / input.length;
+    const inverse = 1 / Math.sqrt(variance + 1e-5);
+    return Float64Array.from(input, (x, i) => (x - mean) * inverse * scale[i]! + bias[i]!);
+  }
+
   private matVec(input: Float64Array, name: string, outSize: number): Float64Array {
     const matrix = this.vector(name);
     const out = new Float64Array(outSize);
@@ -229,7 +236,7 @@ export class TransformerModel {
     const ffBias = this.vector("ffNormBias");
     const projected = new Float64Array(e);
     for (let i = 0; i < e; i++) for (let j = 0; j < e; j++) projected[j] = projected[j]! + attended[i]! * outMatrix[i * e + j]!;
-    let state = this.normalize(Float64Array.from(states[last]!, (x, i) => x + projected[i]!), attentionScale, attentionBias);
+    let state = this.normalizeLegacy(Float64Array.from(states[last]!, (x, i) => x + projected[i]!), attentionScale, attentionBias);
     const hidden = new Float64Array(this.config.feedForwardSize);
     for (let i = 0; i < e; i++) for (let j = 0; j < hidden.length; j++) hidden[j] = hidden[j]! + state[i]! * ff1[i * hidden.length + j]!;
     for (let j = 0; j < hidden.length; j++) {
