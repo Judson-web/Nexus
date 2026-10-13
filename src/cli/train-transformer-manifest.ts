@@ -171,11 +171,15 @@ async function main(): Promise<void> {
       truncatedExamples += 1;
     }
     if (tokens.length < 2) continue;
-    console.error(`[train] example ${exampleIndex}/${trainingExamples.length}; targets=${tokens.length - 1}; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
-    const metrics = model.train(tokens, learningRate, epochs, 1, optimizer, (progress) => {
+    const scheduleProgress = (exampleIndex - 1) / Math.max(1, trainingExamples.length - 1);
+    const scheduledLearningRate = schedule === "cosine"
+      ? learningRate * (0.1 + 0.9 * 0.5 * (1 + Math.cos(Math.PI * scheduleProgress)))
+      : learningRate;
+    console.error(`[train] example ${exampleIndex}/${trainingExamples.length}; targets=${tokens.length - 1}; lr=${scheduledLearningRate.toExponential(3)}; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
+    const metrics = model.train(tokens, scheduledLearningRate, epochs, 1, optimizer, (progress) => {
       if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit during example ${exampleIndex}/${trainingExamples.length}.`);
       console.error(`[train] example ${exampleIndex}/${trainingExamples.length} epoch ${progress.epoch}/${progress.epochs}: ${progress.targetsProcessed}/${progress.totalTargets} targets; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
-    }, targetStride, weightDecay, schedule);
+    }, targetStride, weightDecay, "constant");
     weightedLoss += metrics.loss * metrics.examples;
     trainedTokens += metrics.examples;
     lastGradientNorm = metrics.gradientNorm;
