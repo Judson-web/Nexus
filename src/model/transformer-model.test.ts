@@ -124,3 +124,17 @@ test("Transformer supports deterministic strided target sampling and reports sam
   assert.deepEqual(progress.at(-1), { epoch: 1, epochs: 1, targetsProcessed: 5, totalTargets: 5 });
   assert.throws(() => new TransformerModel(tinyConfig).train(tokens, 0.001, 1, 1, "adam", undefined, 0), /targetStride/);
 });
+
+test("Transformer AdamW applies decoupled weight decay with a cosine schedule", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 83 };
+  const tokens = [1, 2, 1, 2, 1, 2, 1, 2];
+  const first = new TransformerModel(tinyConfig);
+  const second = new TransformerModel(tinyConfig);
+  const metrics = first.train(tokens, 0.001, 3, 1, "adamw", undefined, 1, 0.01, "cosine");
+  second.train(tokens, 0.001, 3, 1, "adamw", undefined, 1, 0.01, "cosine");
+  assert.ok(Number.isFinite(metrics.loss));
+  assert.deepEqual(first.toCheckpoint().weights, second.toCheckpoint().weights);
+  assert.ok(first.toCheckpoint().weights.some((weight, index) => weight !== new TransformerModel(tinyConfig).toCheckpoint().weights[index]));
+  assert.throws(() => new TransformerModel(tinyConfig).train(tokens, 0.001, 1, 1, "adamw", undefined, 1, -0.1), /weightDecay/i);
+  assert.throws(() => new TransformerModel(tinyConfig).train(tokens, 0.001, 1, 1, "adam", undefined, 1, 0.01), /only by adamw/i);
+});
