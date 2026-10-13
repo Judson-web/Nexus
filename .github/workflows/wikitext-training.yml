@@ -1,0 +1,95 @@
+name: Nexus WikiText-103 training
+
+on:
+  push:
+    branches:
+      - "feat/wikitext-corpus-training"
+  workflow_dispatch:
+    inputs:
+      train_rows:
+        description: "WikiText training lines to acquire (100-100000)"
+        required: true
+        default: "5000"
+        type: string
+      validation_rows:
+        description: "Held-out validation lines (50-10000)"
+        required: true
+        default: "500"
+        type: string
+      test_rows:
+        description: "Held-out test lines (50-10000)"
+        required: true
+        default: "500"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  acquire-train-evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - name: Acquire actual WikiText-103 raw text with revision and license checks
+        run: npm run acquire:wikitext -- --train-rows "${{ inputs.train_rows || '5000' }}" --validation-rows "${{ inputs.validation_rows || '500' }}" --test-rows "${{ inputs.test_rows || '500' }}" --max-scan-per-split 100000 --output artifacts/wikitext-103
+      - name: Build source-split training manifest
+        run: npm run prepare:dataset:source-splits -- --train artifacts/wikitext-103/train.txt --validation artifacts/wikitext-103/validation.txt --test artifacts/wikitext-103/test.txt --source-name "WikiText-103 raw Wikipedia text" --source-url "https://huggingface.co/datasets/Salesforce/wikitext" --license "CC BY-SA 3.0; see pinned acquisition manifest" --attribution "WikiText-103 / Wikipedia; dataset revision, split counts, and content hashes in acquisition manifest" --output artifacts/dataset-manifest.json
+      - name: Audit token coverage and sequence lengths
+        run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/dataset-manifest.json > artifacts/tokenizer-audit.json
+      - name: Train on the acquired corpus
+        run: npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output artifacts/wikitext-transformer.json --epochs 1 --seed 17 --optimizer adam --context-size 16 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate 0.0003 --max-minutes 50 --max-tokens-per-example 128 --target-stride 8
+      - name: Verify checkpoint, provenance, and held-out metrics
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            import { createHash } from "node:crypto";
+            const manifest = JSON.parse(readFileSync("artifacts/dataset-manifest.json", "utf8"));
+            const checkpoint = readFileSync("artifacts/wikitext-transformer.json");
+            const provenance = JSON.parse(readFileSync("artifacts/wikitext-transformer.json.provenance.json", "utf8"));
+            const digest = createHash("sha256").update(checkpoint).digest("hex");
+            if (provenance.checkpoint.sha256 !== digest) throw new Error("Checkpoint checksum mismatch");
+            if (provenance.dataset.validationAndTestUsedForTraining !== false) throw new Error("Held-out split leakage guard failed");
+            if (provenance.training.trainedExamples !== manifest.splits.train) throw new Error("Trainer did not consume every train example");
+            for (const split of ["validation", "test"]) {
+              const score = provenance.heldOutEvaluation[split];
+              if (!Number.isFinite(score.negativeLogLikelihood) || !Number.isFinite(score.perplexity) || score.tokens < 1) throw new Error("Invalid " + split + " metrics");
+            }
+            writeFileSync("artifacts/wikitext-run-summary.json", JSON.stringify({
+              dataset: manifest.dataset,
+              revision: manifest.revision,
+              license: manifest.license,
+              sourceCounts: manifest.counts,
+              preparedCounts: manifest.splits,
+              training: provenance.training,
+              heldOutEvaluation: provenance.heldOutEvaluation,
+              checkpointSha256: digest,
+              qualityGate: "Metrics are necessary but not sufficient; generation samples must be reviewed for coherent text before any promotion."
+            }, null, 2) + "\n");
+            console.log(readFileSync("artifacts/wikitext-run-summary.json", "utf8"));
+          '
+      - name: Generate samples for human quality review
+        run: |
+          mkdir -p artifacts/wikitext-generation
+          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/wikitext-transformer.json --prompt "The history of science" --tokens 120 > artifacts/wikitext-generation/science.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/wikitext-transformer.json --prompt "In the early years" --tokens 120 > artifacts/wikitext-generation/history.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-wikitext-103-training-${{ github.run_id }}
+          path: |
+            artifacts/wikitext-103/
+            artifacts/dataset-manifest.json
+            artifacts/tokenizer-audit.json
+            artifacts/wikitext-transformer.json
+            artifacts/wikitext-transformer.json.sha256
+            artifacts/wikitext-transformer.json.provenance.json
+            artifacts/wikitext-run-summary.json
+            artifacts/wikitext-generation/
+          if-no-files-found: error
+          retention-days: 14
