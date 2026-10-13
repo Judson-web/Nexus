@@ -54,7 +54,7 @@ export async function loadVerifiedTransformerArtifact(
   }
   if (!parsed || typeof parsed !== "object" || !("format" in parsed) ||
       parsed.format !== "nexus-transformer" || !("version" in parsed) ||
-      parsed.version !== 1 || !("config" in parsed) || !("weights" in parsed)) {
+      (parsed.version !== 1 && parsed.version !== 2) || !("config" in parsed) || !("weights" in parsed)) {
     throw new Error("Transformer checkpoint has an unsupported format.");
   }
 

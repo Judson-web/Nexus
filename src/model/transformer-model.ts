@@ -13,13 +13,15 @@ export interface TransformerConfig {
 
 export interface TransformerCheckpoint {
   readonly format: "nexus-transformer";
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly config: TransformerConfig;
   readonly weights: number[];
+  readonly optimizerState?: { readonly step: number; readonly firstMoment: number[]; readonly secondMoment: number[] };
   readonly tokenizer?: BytePairTokenizerData;
 }
 
-export type TransformerOptimizer = "sgd" | "adam";
+export type TransformerOptimizer = "sgd" | "adam" | "adamw";
+export type LearningRateSchedule = "constant" | "cosine";
 
 export interface TransformerMetrics {
   readonly loss: number;
@@ -114,6 +116,19 @@ export class TransformerModel {
     }
     this.adamFirstMoment = new Float64Array(this.weights.length);
     this.adamSecondMoment = new Float64Array(this.weights.length);
+    const optimizerState = checkpoint?.optimizerState;
+    if (optimizerState !== undefined) {
+      if (!Number.isSafeInteger(optimizerState.step) || optimizerState.step < 0 ||
+          optimizerState.firstMoment.length !== this.weights.length ||
+          optimizerState.secondMoment.length !== this.weights.length ||
+          optimizerState.firstMoment.some((value) => !Number.isFinite(value)) ||
+          optimizerState.secondMoment.some((value) => !Number.isFinite(value))) {
+        throw new Error("Checkpoint optimizer state is malformed.");
+      }
+      this.adamStep = optimizerState.step;
+      this.adamFirstMoment.set(optimizerState.firstMoment);
+      this.adamSecondMoment.set(optimizerState.secondMoment);
+    }
   }
 
   private vector(name: string): Float64Array {
@@ -238,7 +253,7 @@ export class TransformerModel {
    * single optimizer update. This reference implementation prioritizes correctness
    * and gradient inspectability over training throughput.
    */
-  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void, targetStride = 1): TransformerMetrics {
+  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void, targetStride = 1, weightDecay = 0, schedule: LearningRateSchedule = "cosine"): TransformerMetrics {
     this.validateTokens(tokens);
     checkInteger(epochs, "epochs", 1, 1000);
     if (tokens.length < 2) throw new Error("At least two tokens are required.");
@@ -248,7 +263,10 @@ export class TransformerModel {
     if (!Number.isFinite(maxGradientNorm) || maxGradientNorm <= 0) {
       throw new RangeError("maxGradientNorm must be finite and positive.");
     }
-    if (optimizer !== "sgd" && optimizer !== "adam") throw new RangeError("optimizer must be sgd or adam.");
+    if (optimizer !== "sgd" && optimizer !== "adam" && optimizer !== "adamw") throw new RangeError("optimizer must be sgd, adam, or adamw.");
+    if (!Number.isFinite(weightDecay) || weightDecay < 0 || weightDecay > 0.1) throw new RangeError("weightDecay must be finite and in [0, 0.1].");
+    if (schedule !== "constant" && schedule !== "cosine") throw new RangeError("schedule must be constant or cosine.");
+    if (optimizer !== "adamw" && weightDecay !== 0) throw new RangeError("weightDecay is supported only by adamw.");
     checkInteger(targetStride, "targetStride", 1, 32);
     const targetIndices: number[] = [];
     for (let i = 1; i < tokens.length; i += targetStride) targetIndices.push(i);
@@ -259,6 +277,8 @@ export class TransformerModel {
     const gradient = new Float64Array(this.weights.length);
     let loss = 0;
     for (let epoch = 0; epoch < epochs; epoch++) {
+      const scheduleScale = schedule === "cosine" && epochs > 1 ? 0.1 + 0.9 * 0.5 * (1 + Math.cos(Math.PI * epoch / (epochs - 1))) : 1;
+      const epochLearningRate = learningRate * scheduleScale;
       gradient.fill(0);
       loss = 0;
       for (let targetIndex = 0; targetIndex < targetIndices.length; targetIndex++) {
@@ -284,7 +304,7 @@ export class TransformerModel {
       gradientNorm = Math.sqrt(squaredNorm);
       if (!Number.isFinite(gradientNorm)) throw new RangeError("Training produced a non-finite gradient norm.");
       gradientScale = gradientNorm > maxGradientNorm ? maxGradientNorm / gradientNorm : 1;
-      if (optimizer === "adam") this.adamStep += 1;
+      if (optimizer === "adam" || optimizer === "adamw") this.adamStep += 1;
       const beta1 = 0.9;
       const beta2 = 0.999;
       const epsilon = 1e-8;
@@ -298,12 +318,13 @@ export class TransformerModel {
           this.adamSecondMoment[p] = beta2 * this.adamSecondMoment[p]! + (1 - beta2) * averagedGradient * averagedGradient;
           const first = this.adamFirstMoment[p]! / biasCorrection1;
           const second = this.adamSecondMoment[p]! / biasCorrection2;
-          update = learningRate * first / (Math.sqrt(second) + epsilon);
+          update = epochLearningRate * first / (Math.sqrt(second) + epsilon);
         } else {
-          update = learningRate * averagedGradient;
+          update = epochLearningRate * averagedGradient;
         }
         if (!Number.isFinite(update)) throw new RangeError("Training produced a non-finite parameter update.");
-        this.weights[p] = this.weights[p]! - update;
+        const decay = optimizer === "adamw" ? epochLearningRate * weightDecay * this.weights[p]! : 0;
+        this.weights[p] = this.weights[p]! - update - decay;
         if (!Number.isFinite(this.weights[p]!)) throw new RangeError("Training produced a non-finite parameter.");
       }
     }
@@ -350,11 +371,11 @@ export class TransformerModel {
   }
 
   public toCheckpoint(): TransformerCheckpoint {
-    return { format: "nexus-transformer", version: 1, config: { ...this.config }, weights: Array.from(this.weights) };
+    return { format: "nexus-transformer", version: 2, config: { ...this.config }, weights: Array.from(this.weights), optimizerState: { step: this.adamStep, firstMoment: Array.from(this.adamFirstMoment), secondMoment: Array.from(this.adamSecondMoment) } };
   }
 
   public static fromCheckpoint(checkpoint: TransformerCheckpoint): TransformerModel {
-    if (!checkpoint || checkpoint.format !== "nexus-transformer" || checkpoint.version !== 1 || !checkpoint.config) {
+    if (!checkpoint || checkpoint.format !== "nexus-transformer" || (checkpoint.version !== 1 && checkpoint.version !== 2) || !checkpoint.config) {
       throw new Error("Unsupported Transformer checkpoint.");
     }
     return new TransformerModel(checkpoint.config, checkpoint);
