@@ -118,7 +118,7 @@ async function main(): Promise<void> {
   // local CPU profiler confirms that the available memory/compute can sustain it.
   const candidates: Candidate[] = [
     { name: "adam-context8", seed, contextSize: 8, embeddingSize: 8, heads: 2, layers: 2, feedForwardSize: 16, learningRate: 0.0003, optimizer: "adamw" },
-    { name: "adam-context16", seed: seed + 1, contextSize: 16, embeddingSize: 8, heads: 2, layers: 3, feedForwardSize: 16, learningRate: 0.0003, optimizer: "adamw" },
+    { name: "adam-context32", seed: seed + 1, contextSize: 32, embeddingSize: 8, heads: 2, layers: 2, feedForwardSize: 16, learningRate: 0.0003, optimizer: "adamw" },
     { name: "adam-wider", seed: seed + 2, contextSize: 12, embeddingSize: 12, heads: 3, layers: 2, feedForwardSize: 24, learningRate: 0.0002, optimizer: "adam" },
     { name: "sgd-control", seed: seed + 3, contextSize: 8, embeddingSize: 8, heads: 2, layers: 1, feedForwardSize: 16, learningRate: 0.0001, optimizer: "sgd" },
   ];
