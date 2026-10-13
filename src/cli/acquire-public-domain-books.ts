@@ -128,9 +128,15 @@ async function main(): Promise<void> {
   const records: { id: string; text: string; split: Split; workId: number; textSha256: string }[] = [];
   const works: { id: number; title: string; author: string; year: number; url: string; split: Split; rawSha256: string; bodySha256: string; acceptedParagraphs: number; bodyCharacters: number }[] = [];
   for (const work of WORKS) {
-    const url = `https://www.gutenberg.org/cache/epub/${work.id}/pg${work.id}.txt.utf8`;
+    const urls = [
+      `https://www.gutenberg.org/cache/epub/${work.id}/pg${work.id}.txt.utf8`,
+      `https://www.gutenberg.org/cache/epub/${work.id}/pg${work.id}.txt`,
+      `https://www.gutenberg.org/files/${work.id}/${work.id}-0.txt`,
+      `https://www.gutenberg.org/files/${work.id}/${work.id}.txt`,
+    ];
     console.log(`[corpus] downloading ${work.id}: ${work.title}`);
-    const raw = await download(url, timeoutMs);
+    const downloaded = await download(urls, timeoutMs, work.id);
+    const { text: raw, url } = downloaded;
     const body = extractBody(raw, work.id);
     const split = splitForWork(work.id);
     const selected = paragraphs(body, paragraphsPerBook);
