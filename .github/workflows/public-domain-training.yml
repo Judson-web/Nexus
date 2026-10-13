@@ -104,14 +104,15 @@ jobs:
             learning_rate: "0.0003"
             target_stride: 2
             gradient_backend: tape
-          - name: context64-scalar-baseline
+          - name: context64-tape-length-cyclic
             context_size: 64
             embedding_size: 16
             heads: 4
             feed_forward_size: 64
             learning_rate: "0.0003"
             target_stride: 2
-            gradient_backend: scalar
+            gradient_backend: tape
+            data_order: length-cyclic
     name: Train ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -134,6 +135,7 @@ jobs:
           --seed 17
           --optimizer adam
           --gradient-backend ${{ matrix.gradient_backend }}
+          --data-order "${{ matrix.data_order || 'manifest' }}"
           --context-size ${{ matrix.context_size }}
           --embedding-size ${{ matrix.embedding_size }}
           --heads ${{ matrix.heads }}
