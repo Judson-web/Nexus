@@ -76,3 +76,10 @@ See [`docs/production-readiness.md`](docs/production-readiness.md) for the relea
 ## Workflow
 
 Develop on feature branches. TypeScript checks, tests, and production builds run in GitHub Actions. Vercel's Git build-ignore setting prevents automatic deployments from routine commits; production deployment is a separate, explicit action after verification.
+
+
+## First-response corpus
+
+The bounded first-response training workflow uses the pinned [OpenAssistant Conversations Dataset (OASST1)](https://huggingface.co/datasets/OpenAssistant/oasst1/tree/fdf72ae0827c1cda404aff25b6603abec9e3399b), released under Apache-2.0. The acquisition script verifies the upstream revision and declared license before and after retrieval, keeps English user/assistant parent-child pairs, excludes deleted and synthetic messages, filters obvious contact information and high toxicity scores where available, and records split hashes, source attribution, and provenance in an artifact manifest. Downloaded conversations are not committed to this repository.
+
+The workflow hash-splits complete trees from the official training partition into train and validation sets and preserves the official OASST1 validation partition as held-out test data. Samples are serialized as `User: ... Assistant: ...`. The current trainer learns the whole sequence rather than masking loss to assistant-only tokens, so this is a fast first-response baseline—not a claim of polished conversational behavior. Apache-2.0 license and attribution notices must accompany redistributed copies. See the [OASST1 dataset card](https://huggingface.co/datasets/OpenAssistant/oasst1) and [OpenAssistant license guidance](https://github.com/LAION-AI/Open-Assistant/blob/main/docs/docs/faq.md).
