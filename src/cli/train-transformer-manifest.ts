@@ -116,6 +116,7 @@ async function main(): Promise<void> {
   let modelConfig: typeof config & { vocabSize: number };
   let model: TransformerModel;
   const completedExampleIds = new Set<string>();
+  let resumedTruncatedExamples = 0;
   const resumePath = resumeFrom ? `${resumeFrom}.resume.json` : `${outputPath}.resume.json`;
   if (resumeFrom) {
     const rawCheckpoint = JSON.parse(await readFile(resumeFrom, "utf8")) as TransformerCheckpoint & { tokenizer?: import("../tokenizer/byte-pair-tokenizer.js").BytePairTokenizerData };
@@ -125,7 +126,7 @@ async function main(): Promise<void> {
     if (JSON.stringify(rawCheckpoint.config) !== JSON.stringify(modelConfig)) throw new Error("Resume checkpoint model configuration does not match the requested configuration.");
     const resumeState = JSON.parse(await readFile(resumePath, "utf8")) as {
       format: string; manifestSha256: string; completedExampleIds: string[]; modelConfig: typeof modelConfig;
-      epochs: number; learningRate: number; optimizer: TransformerOptimizer; schedule: LearningRateSchedule; weightDecay: number; targetStride: number; maxTokensPerExample: number;
+      epochs: number; learningRate: number; optimizer: TransformerOptimizer; schedule: LearningRateSchedule; weightDecay: number; targetStride: number; maxTokensPerExample: number; truncatedExamples?: number;
     };
     if (resumeState.format !== "nexus-training-resume" || resumeState.manifestSha256 !== manifestSha256) throw new Error("Resume checkpoint manifest hash mismatch.");
     if (JSON.stringify(resumeState.modelConfig) !== JSON.stringify(modelConfig) ||
@@ -137,6 +138,7 @@ async function main(): Promise<void> {
     }
     if (!Array.isArray(resumeState.completedExampleIds) || resumeState.completedExampleIds.some((id) => typeof id !== "string")) throw new Error("Resume progress metadata is malformed.");
     for (const id of resumeState.completedExampleIds) completedExampleIds.add(id);
+    resumedTruncatedExamples = resumeState.truncatedExamples ?? 0;
     model = TransformerModel.fromCheckpoint(rawCheckpoint);
     if (completedExampleIds.size > trainingExamples.length || [...completedExampleIds].some((id) => !trainingExamples.some((example) => example.id === id))) {
       throw new Error("Resume progress contains unknown training example IDs.");
@@ -149,7 +151,7 @@ async function main(): Promise<void> {
   }
   let weightedLoss = 0;
   let trainedTokens = 0;
-  let truncatedExamples = 0;
+  let truncatedExamples = resumedTruncatedExamples;
   let lastGradientNorm = 0;
   let lastGradientScale = 1;
 
@@ -191,6 +193,7 @@ async function main(): Promise<void> {
   }
   if (trainedTokens === 0 && completedExampleIds.size === 0) throw new Error("Training examples contain no usable next-token targets.");
 
+  const finalTrainingEvaluation = scoreSplit(trainingExamples, model, tokenizer, config.contextSize);
   const validationExamples = manifest.examples.filter((example) => example.split === "validation");
   const testExamples = manifest.examples.filter((example) => example.split === "test");
   const heldOutEvaluation = {
@@ -234,7 +237,7 @@ async function main(): Promise<void> {
   await writeAtomic(outputPath, checkpointContent);
   await writeAtomic(`${outputPath}.sha256`, `${checkpointSha256}  ${checkpointBytes.length}\n`);
   await writeAtomic(`${outputPath}.provenance.json`, JSON.stringify(provenance, null, 2) + "\n");
-  await writeAtomic(`${outputPath}.resume.json`, JSON.stringify({ format: "nexus-training-resume", manifestSha256, completedExampleIds: [...completedExampleIds], modelConfig, epochs, learningRate, optimizer, schedule, weightDecay, targetStride, maxTokensPerExample }, null, 2) + "\n");
+  await writeAtomic(`${outputPath}.resume.json`, JSON.stringify({ format: "nexus-training-resume", manifestSha256, completedExampleIds: [...completedExampleIds], modelConfig, epochs, learningRate, optimizer, schedule, weightDecay, targetStride, maxTokensPerExample, truncatedExamples }, null, 2) + "\n");
   console.log(JSON.stringify({ outputPath, checkpointSha256, provenancePath: `${outputPath}.provenance.json`, ...provenance.training, heldOutEvaluation }, null, 2));
 }
 
