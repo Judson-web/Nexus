@@ -76,7 +76,7 @@ async function getPinnedRevision(timeoutMs: number): Promise<string> {
     throw new Error("Hugging Face did not return a valid immutable dataset revision.");
   }
   const license = metadata.cardData?.license;
-  if (typeof license !== "string" || !["cc-by-sa-3.0,gfdl", "cc-by-sa-3.0", "cc-by-sa-3.0-de"].includes(license.toLowerCase())) {
+  if (typeof license !== "string" || !["cc-by-sa-3.0,gfdl", "cc-by-sa-3.0", "cc-by-sa-3.0-de"].includes(license.trim().toLowerCase().replace(/\\s+/gu, ""))) {
     throw new Error(`Unexpected WikiText dataset license metadata: ${String(license)}. Refusing acquisition until reviewed.`);
   }
   return metadata.sha;
