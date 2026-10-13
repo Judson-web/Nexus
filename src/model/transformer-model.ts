@@ -117,9 +117,9 @@ export class TransformerModel {
       for (const [name, range] of Object.entries(this.ranges)) {
         const scale = name.endsWith("attentionNormScale") || name.endsWith("ffNormScale") ? 0 : 1 / Math.sqrt(Math.max(1, e));
         for (let i = 0; i < range.length; i++) {
-          this.weights[range.start + i] = name === "attentionNormScale" || name === "ffNormScale"
+          this.weights[range.start + i] = name.endsWith("attentionNormScale") || name.endsWith("ffNormScale")
             ? 1
-            : name === "attentionNormBias" || name === "ffNormBias" || name.endsWith("Bias")
+            : name.endsWith("attentionNormBias") || name.endsWith("ffNormBias") || name.endsWith("Bias")
               ? 0
               : (random.next() * 2 - 1) * scale;
         }
