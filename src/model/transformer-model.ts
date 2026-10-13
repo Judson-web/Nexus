@@ -16,6 +16,12 @@ export interface TransformerCheckpoint {
   readonly version: 1;
   readonly config: TransformerConfig;
   readonly weights: number[];
+  readonly optimizerState?: {
+    readonly kind: "adam";
+    readonly step: number;
+    readonly firstMoment: number[];
+    readonly secondMoment: number[];
+  };
   readonly tokenizer?: BytePairTokenizerData;
 }
 
@@ -114,6 +120,19 @@ export class TransformerModel {
     }
     this.adamFirstMoment = new Float64Array(this.weights.length);
     this.adamSecondMoment = new Float64Array(this.weights.length);
+    const optimizerState = checkpoint?.optimizerState;
+    if (optimizerState !== undefined) {
+      if (optimizerState.kind !== "adam" || !Number.isSafeInteger(optimizerState.step) || optimizerState.step < 0
+        || optimizerState.firstMoment.length !== this.weights.length
+        || optimizerState.secondMoment.length !== this.weights.length
+        || optimizerState.firstMoment.some((x) => !Number.isFinite(x))
+        || optimizerState.secondMoment.some((x) => !Number.isFinite(x) || x < 0)) {
+        throw new Error("Checkpoint Adam optimizer state is invalid.");
+      }
+      this.adamStep = optimizerState.step;
+      this.adamFirstMoment.set(optimizerState.firstMoment);
+      this.adamSecondMoment.set(optimizerState.secondMoment);
+    }
   }
 
   private vector(name: string): Float64Array {
@@ -350,7 +369,18 @@ export class TransformerModel {
   }
 
   public toCheckpoint(): TransformerCheckpoint {
-    return { format: "nexus-transformer", version: 1, config: { ...this.config }, weights: Array.from(this.weights) };
+    return {
+      format: "nexus-transformer",
+      version: 1,
+      config: { ...this.config },
+      weights: Array.from(this.weights),
+      optimizerState: {
+        kind: "adam",
+        step: this.adamStep,
+        firstMoment: Array.from(this.adamFirstMoment),
+        secondMoment: Array.from(this.adamSecondMoment),
+      },
+    };
   }
 
   public static fromCheckpoint(checkpoint: TransformerCheckpoint): TransformerModel {
