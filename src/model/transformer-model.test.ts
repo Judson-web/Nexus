@@ -152,3 +152,17 @@ test("Transformer checkpoint preserves AdamW moments and exact continuation", ()
   const malformed = { ...restored.toCheckpoint(), optimizerState: { step: -1, firstMoment: [], secondMoment: [] } };
   assert.throws(() => TransformerModel.fromCheckpoint(malformed), /optimizer state/i);
 });
+
+test("Transformer supports independently parameterized decoder depth", () => {
+  const shallow = new TransformerModel({ ...config, vocabSize: 8, layerCount: 1 });
+  const deep = new TransformerModel({ ...config, vocabSize: 8, layerCount: 3 });
+  assert.equal(shallow.config.layerCount, 1);
+  assert.equal(deep.config.layerCount, 3);
+  assert.ok(deep.toCheckpoint().weights.length > shallow.toCheckpoint().weights.length * 2);
+  const before = deep.toCheckpoint().weights;
+  const metrics = deep.train([1, 2, 3, 1, 2, 3], 0.001, 1, 1, "adamw");
+  const after = deep.toCheckpoint().weights;
+  assert.ok(Number.isFinite(metrics.loss));
+  assert.ok(after.some((weight, index) => weight !== before[index]));
+  assert.deepEqual(TransformerModel.fromCheckpoint(deep.toCheckpoint()).probabilities([1, 2]), deep.probabilities([1, 2]));
+});
