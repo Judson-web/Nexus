@@ -38,7 +38,7 @@ const WORKS: readonly Work[] = [
   { id: 1661, title: "The Adventures of Sherlock Holmes", author: "Arthur Conan Doyle", year: 1892 },
   { id: 2591, title: "Grimms' Fairy Tales", author: "Jacob and Wilhelm Grimm", year: 1812 },
   { id: 2701, title: "Moby Dick", author: "Herman Melville", year: 1851 },
-  { id: 5740, title: "The Secret Garden", author: "Frances Hodgson Burnett", year: 1911 },
+  { id: 17396, title: "The Secret Garden", author: "Frances Hodgson Burnett", year: 1911 },
 ] as const;
 
 function parseArgs(args: string[]): Map<string, string> {
