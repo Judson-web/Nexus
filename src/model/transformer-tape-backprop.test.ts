@@ -12,6 +12,7 @@ test("typed-array Transformer tape matches scalar reference loss and every param
     embeddingSize: 4,
     headCount: 2,
     feedForwardSize: 4,
+    layerCount: 1,
     seed: 23,
   };
   const model = new TransformerModel(config);
@@ -41,6 +42,7 @@ test("typed-array Transformer gradients match finite differences", () => {
     embeddingSize: 4,
     headCount: 2,
     feedForwardSize: 4,
+    layerCount: 1,
     seed: 31,
   };
   const model = new TransformerModel(config);
