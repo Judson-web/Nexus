@@ -7,14 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       documents:
-        description: "Number of eligible CC0 abstracts to acquire (3-1000)"
-        required: true
-        default: "200"
-        type: string
-      max_rows:
-        description: "Maximum dataset-viewer rows to scan (100-20000)"
+        description: "Maximum OASST1 training rows to scan (100-20000)"
         required: true
         default: "5000"
+        type: string
+      validation_rows:
+        description: "OASST1 validation rows to scan (100-4401)"
+        required: true
+        default: "4401"
         type: string
       epochs:
         description: "Training epochs per example (start small)"
@@ -42,10 +42,10 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run check
       - run: npm test
-      - name: Acquire bounded, provenance-checked CC0 corpus
-        run: npm run acquire:common-pile -- --documents "${{ inputs.documents || '200' }}" --max-rows "${{ inputs.max_rows || '5000' }}" --output artifacts/common-pile-arxiv-abstracts
-      - name: Build split-preserving training manifest
-        run: npm run prepare:dataset:source-splits -- --train artifacts/common-pile-arxiv-abstracts/train.txt --validation artifacts/common-pile-arxiv-abstracts/validation.txt --test artifacts/common-pile-arxiv-abstracts/test.txt --source-name "Common Pile arXiv abstracts" --source-url "https://huggingface.co/datasets/common-pile/arxiv_abstracts" --license "CC0 (record-level metadata checked; see acquisition manifest)" --attribution "Common Pile arXiv abstracts; source URLs and authors in acquisition manifest" --output artifacts/dataset-manifest.json
+      - name: Acquire pinned, license-verified OASST1 conversations
+        run: npm run acquire:oasst1 -- --train-rows "${{ inputs.documents || '5000' }}" --validation-rows "${{ inputs.validation_rows || '4401' }}" --output artifacts/oasst1
+      - name: Build conversation training manifest with isolated splits
+        run: npm run prepare:dataset:source-splits -- --train artifacts/oasst1/train.txt --validation artifacts/oasst1/validation.txt --test artifacts/oasst1/test.txt --source-name "OpenAssistant Conversations Dataset (OASST1)" --source-url "https://huggingface.co/datasets/OpenAssistant/oasst1/tree/fdf72ae0827c1cda404aff25b6603abec9e3399b" --license "Apache-2.0" --attribution "OpenAssistant contributors, OASST1, Apache-2.0; see LICENSE and acquisition manifest" --output artifacts/dataset-manifest.json
       - name: Audit tokenizer coverage and sequence lengths
         run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/dataset-manifest.json > artifacts/tokenizer-audit.json
       - name: Run concurrent, validation-ranked model sweep
@@ -110,7 +110,7 @@ jobs:
         with:
           name: nexus-expanded-corpus-transformer-${{ github.run_id }}
           path: |
-            artifacts/common-pile-arxiv-abstracts/
+            artifacts/oasst1/
             artifacts/dataset-manifest.json
             artifacts/sweep/
             artifacts/sweep-summary.json
