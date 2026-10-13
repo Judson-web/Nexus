@@ -59,25 +59,35 @@ function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-async function download(url: string, timeoutMs: number): Promise<string> {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
-    try {
-      const response = await fetch(url, {
-        headers: { "user-agent": "Nexus-Licensed-Corpus-Acquisition/1.0 (research; public-domain works)", accept: "text/plain" },
-        signal: AbortSignal.timeout(timeoutMs),
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-      const text = await response.text();
-      if (text.length < 20_000) throw new Error(`Unexpectedly short Gutenberg response for ${url} (${text.length} chars)`);
-      return text.replace(/^\uFEFF/, "").replaceAll("\r\n", "\n");
-    } catch (error) {
-      lastError = error;
-      if (attempt < 4) await delay(500 * 2 ** (attempt - 1));
+async function download(urls: readonly string[], timeoutMs: number, ebookId: number): Promise<{ text: string; url: string }> {
+  const failures: string[] = [];
+  for (const url of urls) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const response = await fetch(url, {
+          headers: { "user-agent": "Nexus-Licensed-Corpus-Acquisition/1.0 (research; public-domain works)", accept: "text/plain" },
+          signal: AbortSignal.timeout(timeoutMs),
+          cache: "no-store",
+        });
+        if (response.status === 404 || response.status === 410) {
+          failures.push(`HTTP ${response.status}: ${url}`);
+          break;
+        }
+        if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+        const text = (await response.text()).replace(/^\\uFEFF/, "").replaceAll("\\r\\n", "\\n");
+        if (text.length < 20_000) throw new Error(`Unexpectedly short response (${text.length} chars)`);
+        if (!/\\*\\*\\* START OF (THE|THIS) PROJECT GUTENBERG EBOOK/i.test(text) ||
+            !/\\*\\*\\* END OF (THE|THIS) PROJECT GUTENBERG EBOOK/i.test(text)) {
+          throw new Error("Gutenberg ebook markers missing");
+        }
+        return { text, url };
+      } catch (error) {
+        failures.push(`${url}: ${error instanceof Error ? error.message : String(error)}`);
+        if (attempt < 3) await delay(500 * 2 ** (attempt - 1));
+      }
     }
   }
-  throw new Error(`Download failed after retries: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+  throw new Error(`Could not retrieve verified Gutenberg ebook ${ebookId}. Tried ${urls.length} URLs. ${failures.join(" | ")}`);
 }
 
 function extractBody(raw: string, id: number): string {
