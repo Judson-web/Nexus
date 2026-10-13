@@ -13,9 +13,10 @@ export interface TransformerConfig {
 
 export interface TransformerCheckpoint {
   readonly format: "nexus-transformer";
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly config: TransformerConfig;
   readonly weights: number[];
+  readonly optimizerState?: { readonly step: number; readonly firstMoment: number[]; readonly secondMoment: number[] };
   readonly tokenizer?: BytePairTokenizerData;
 }
 
@@ -115,6 +116,19 @@ export class TransformerModel {
     }
     this.adamFirstMoment = new Float64Array(this.weights.length);
     this.adamSecondMoment = new Float64Array(this.weights.length);
+    const optimizerState = checkpoint?.optimizerState;
+    if (optimizerState !== undefined) {
+      if (!Number.isSafeInteger(optimizerState.step) || optimizerState.step < 0 ||
+          optimizerState.firstMoment.length !== this.weights.length ||
+          optimizerState.secondMoment.length !== this.weights.length ||
+          optimizerState.firstMoment.some((value) => !Number.isFinite(value)) ||
+          optimizerState.secondMoment.some((value) => !Number.isFinite(value))) {
+        throw new Error("Checkpoint optimizer state is malformed.");
+      }
+      this.adamStep = optimizerState.step;
+      this.adamFirstMoment.set(optimizerState.firstMoment);
+      this.adamSecondMoment.set(optimizerState.secondMoment);
+    }
   }
 
   private vector(name: string): Float64Array {
@@ -357,11 +371,11 @@ export class TransformerModel {
   }
 
   public toCheckpoint(): TransformerCheckpoint {
-    return { format: "nexus-transformer", version: 1, config: { ...this.config }, weights: Array.from(this.weights) };
+    return { format: "nexus-transformer", version: 2, config: { ...this.config }, weights: Array.from(this.weights), optimizerState: { step: this.adamStep, firstMoment: Array.from(this.adamFirstMoment), secondMoment: Array.from(this.adamSecondMoment) } };
   }
 
   public static fromCheckpoint(checkpoint: TransformerCheckpoint): TransformerModel {
-    if (!checkpoint || checkpoint.format !== "nexus-transformer" || checkpoint.version !== 1 || !checkpoint.config) {
+    if (!checkpoint || checkpoint.format !== "nexus-transformer" || (checkpoint.version !== 1 && checkpoint.version !== 2) || !checkpoint.config) {
       throw new Error("Unsupported Transformer checkpoint.");
     }
     return new TransformerModel(checkpoint.config, checkpoint);
