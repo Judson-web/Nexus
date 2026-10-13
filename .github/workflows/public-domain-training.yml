@@ -64,7 +64,7 @@ jobs:
       max-parallel: 4
       matrix:
         include:
-          - name: context32-scalar
+          - name: context32-scalar-baseline
             context_size: 32
             embedding_size: 16
             heads: 4
@@ -72,7 +72,7 @@ jobs:
             learning_rate: "0.0003"
             target_stride: 2
             gradient_backend: scalar
-          - name: context32-tape
+          - name: context32-tape-baseline
             context_size: 32
             embedding_size: 16
             heads: 4
@@ -80,15 +80,7 @@ jobs:
             learning_rate: "0.0003"
             target_stride: 2
             gradient_backend: tape
-          - name: context64-scalar
-            context_size: 64
-            embedding_size: 16
-            heads: 4
-            feed_forward_size: 64
-            learning_rate: "0.0003"
-            target_stride: 2
-            gradient_backend: scalar
-          - name: context64-tape
+          - name: context64-tape-baseline
             context_size: 64
             embedding_size: 16
             heads: 4
@@ -96,6 +88,30 @@ jobs:
             learning_rate: "0.0003"
             target_stride: 2
             gradient_backend: tape
+          - name: context64-tape-low-lr
+            context_size: 64
+            embedding_size: 16
+            heads: 4
+            feed_forward_size: 64
+            learning_rate: "0.0001"
+            target_stride: 2
+            gradient_backend: tape
+          - name: context64-tape-wide
+            context_size: 64
+            embedding_size: 24
+            heads: 4
+            feed_forward_size: 96
+            learning_rate: "0.0003"
+            target_stride: 2
+            gradient_backend: tape
+          - name: context64-scalar-baseline
+            context_size: 64
+            embedding_size: 16
+            heads: 4
+            feed_forward_size: 64
+            learning_rate: "0.0003"
+            target_stride: 2
+            gradient_backend: scalar
     name: Train ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
