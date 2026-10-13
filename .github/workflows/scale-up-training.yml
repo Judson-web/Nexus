@@ -1,0 +1,113 @@
+name: Nexus scale-up training
+
+on:
+  push:
+    branches:
+      - "feat/english-curriculum-context"
+    paths:
+      - ".github/workflows/scale-up-training.yml"
+  workflow_dispatch:
+    inputs:
+      epochs:
+        description: "Full-corpus passes for the winning wider model"
+        required: true
+        default: "2"
+        type: string
+      paragraphs_per_book:
+        description: "Deterministically sampled paragraphs per book"
+        required: true
+        default: "120"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexus-scale-up-training-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  train-wide-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - name: Acquire public-domain corpus with provenance
+        run: npm run acquire:public-domain -- --paragraphs-per-book "${{ inputs.paragraphs_per_book || '120' }}" --output artifacts/public-domain-books
+      - name: Build source-preserving splits
+        run: npm run prepare:dataset:source-splits -- --train artifacts/public-domain-books/train.txt --validation artifacts/public-domain-books/validation.txt --test artifacts/public-domain-books/test.txt --source-name "Project Gutenberg public-domain books" --source-url "https://www.gutenberg.org/" --license "Curated US public-domain works; see per-work metadata in acquisition manifest" --attribution "Project Gutenberg ebook IDs, titles, authors, and text hashes in acquisition manifest" --output artifacts/public-domain-manifest.json
+      - name: Audit tokenizer and corpus
+        run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/public-domain-manifest.json > artifacts/tokenizer-audit.json
+      - name: Train the current best architecture for multiple passes
+        run: >-
+          npm run train:transformer:manifest --
+          --manifest artifacts/public-domain-manifest.json
+          --output artifacts/nexus-wide-scaleup.json
+          --epochs "${{ inputs.epochs || '2' }}"
+          --seed 17
+          --optimizer adam
+          --gradient-backend tape
+          --data-order manifest
+          --context-size 64
+          --embedding-size 32
+          --heads 4
+          --feed-forward-size 128
+          --learning-rate 0.0003
+          --max-minutes 300
+          --max-tokens-per-example 512
+          --target-stride 2
+      - name: Verify checkpoint integrity and held-out evaluation
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            import { createHash } from "node:crypto";
+            const path = "artifacts/nexus-wide-scaleup.json";
+            const bytes = readFileSync(path);
+            const digest = createHash("sha256").update(bytes).digest("hex");
+            const provenance = JSON.parse(readFileSync(path + ".provenance.json", "utf8"));
+            const manifest = JSON.parse(readFileSync("artifacts/public-domain-manifest.json", "utf8"));
+            if (provenance.checkpoint.sha256 !== digest) throw new Error("Checkpoint SHA-256 mismatch");
+            if (provenance.dataset.validationAndTestUsedForTraining !== false) throw new Error("Held-out data leakage flag invalid");
+            if (provenance.model.contextSize !== 64 || provenance.model.embeddingSize !== 32 || provenance.model.feedForwardSize !== 128) throw new Error("Unexpected architecture");
+            if (provenance.training.trainedExamples !== manifest.splits.train) throw new Error("Trained-example count mismatch");
+            for (const split of ["validation", "test"]) {
+              const score = provenance.heldOutEvaluation[split];
+              if (!Number.isFinite(score.negativeLogLikelihood) || !Number.isFinite(score.perplexity) || score.tokens < 1) throw new Error("Invalid held-out score: " + split);
+            }
+            writeFileSync("artifacts/scale-up-summary.json", JSON.stringify({
+              candidate: "context64-wide-multi-epoch",
+              checkpointSha256: digest,
+              architecture: provenance.model,
+              training: provenance.training,
+              heldOutEvaluation: provenance.heldOutEvaluation,
+              corpus: { sourceSha256: manifest.sourceSha256, preparedSha256: manifest.preparedSha256, splits: manifest.splits },
+              promotionRequiresHumanGenerationReview: true
+            }, null, 2) + "\n");
+            console.log(readFileSync("artifacts/scale-up-summary.json", "utf8"));
+          '
+      - name: Generate fixed-prompt review samples
+        run: |
+          mkdir -p artifacts/generation-samples
+          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/nexus-wide-scaleup.json --prompt "It was a dark and stormy night" --tokens 240 > artifacts/generation-samples/story.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/nexus-wide-scaleup.json --prompt "The natural world" --tokens 240 > artifacts/generation-samples/nature.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/nexus-wide-scaleup.json --prompt "The meaning of knowledge" --tokens 240 > artifacts/generation-samples/knowledge.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-wide-scaleup-${{ github.run_id }}
+          path: |
+            artifacts/nexus-wide-scaleup.json
+            artifacts/nexus-wide-scaleup.json.sha256
+            artifacts/nexus-wide-scaleup.json.provenance.json
+            artifacts/scale-up-summary.json
+            artifacts/tokenizer-audit.json
+            artifacts/generation-samples/
+            artifacts/public-domain-books/
+            artifacts/public-domain-manifest.json
+          if-no-files-found: error
+          retention-days: 30
