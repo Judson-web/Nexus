@@ -20,6 +20,11 @@ on:
 permissions:
   contents: read
 
+# New commits supersede stale, queued matrix runs; each retained run still fans out into four candidates.
+concurrency:
+  group: nexus-english-training-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   prepare-corpus:
     runs-on: ubuntu-latest
