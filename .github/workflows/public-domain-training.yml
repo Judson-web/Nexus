@@ -1,9 +1,13 @@
 name: Nexus English curriculum training experiments
 
 on:
+  # Expensive matrix runs start only when the training workflow itself changes.
+  # Normal code commits are covered by TypeScript CI and do not restart hours-long experiments.
   push:
     branches:
       - "feat/english-curriculum-context"
+    paths:
+      - ".github/workflows/public-domain-training.yml"
   workflow_dispatch:
     inputs:
       paragraphs_per_book:
