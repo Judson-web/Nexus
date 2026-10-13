@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "feat/large-scale-public-domain-training"
+      - "feat/generation-quality-coverage"
   workflow_dispatch:
     inputs:
       paragraphs_per_book:
@@ -39,7 +40,7 @@ jobs:
       - name: Audit corpus and tokenizer coverage
         run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/public-domain-manifest.json > artifacts/tokenizer-audit.json
       - name: Train the model on the full-text corpus
-        run: npm run train:transformer:manifest -- --manifest artifacts/public-domain-manifest.json --output artifacts/nexus-public-domain-candidate.json --epochs "${{ inputs.epochs || '1' }}" --seed 17 --optimizer adam --context-size 32 --embedding-size 12 --heads 3 --feed-forward-size 48 --learning-rate 0.0003 --max-minutes 300 --max-tokens-per-example 384 --target-stride 4
+        run: npm run train:transformer:manifest -- --manifest artifacts/public-domain-manifest.json --output artifacts/nexus-public-domain-candidate.json --epochs "${{ inputs.epochs || '1' }}" --seed 17 --optimizer adam --context-size 32 --embedding-size 16 --heads 4 --feed-forward-size 64 --learning-rate 0.0003 --max-minutes 300 --max-tokens-per-example 512 --target-stride 3
       - name: Verify provenance and held-out metrics
         run: |
           node --input-type=module -e '
@@ -53,7 +54,8 @@ jobs:
             if (provenance.checkpoint.sha256 !== digest) throw new Error("Checkpoint SHA-256 mismatch");
             if (provenance.dataset.validationAndTestUsedForTraining !== false) throw new Error("Held-out data leakage flag invalid");
             if (provenance.training.trainedExamples !== manifest.splits.train) throw new Error("Actual trained example count differs from train split");
-            if (provenance.model.embeddingSize < 12 || provenance.model.contextSize < 32) throw new Error("Scale-up configuration was not used");
+            if (provenance.training.targetStride !== 3 || provenance.training.maxTokensPerExample !== 512) throw new Error("Expanded token coverage configuration was not used");
+            if (provenance.model.embeddingSize < 16 || provenance.model.contextSize < 32) throw new Error("Scale-up configuration was not used");
             for (const split of ["validation", "test"]) {
               const score = provenance.heldOutEvaluation[split];
               if (!Number.isFinite(score.negativeLogLikelihood) || !Number.isFinite(score.perplexity) || score.tokens < 1) throw new Error("Invalid held-out score: " + split);
