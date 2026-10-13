@@ -192,3 +192,9 @@ test("Transformer accepts the expanded 256-token context limit", () => {
   assert.ok(Math.abs(probabilities.reduce((sum, value) => sum + value, 0) - 1) < 1e-9);
   assert.throws(() => new TransformerModel({ ...config, contextSize: 257 }), /contextSize/i);
 });
+
+test("Transformer accepts the expanded 1024-token vocabulary limit", () => {
+  const largerVocabulary = new TransformerModel({ ...config, vocabSize: 1024, contextSize: 2, layerCount: 1 });
+  assert.equal(largerVocabulary.probabilities([1, 2]).length, 1024);
+  assert.throws(() => new TransformerModel({ ...config, vocabSize: 1025 }), /vocabSize/i);
+});
