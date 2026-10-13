@@ -17,7 +17,7 @@ function parseArgs(args: string[]): Map<string, string> {
     const value = args[i + 1];
     if (!value || value.startsWith("--")) throw new Error(`Missing value for ${key}`);
     if (options.has(name)) throw new Error(`Duplicate option: ${key}`);
-    if (!["manifest", "output", "initial-checkpoint", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
+    if (!["manifest", "output", "initial-checkpoint", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "gradient-backend", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
       throw new Error(`Unknown option: ${key}`);
     }
     options.set(name, value);
@@ -88,6 +88,8 @@ async function main(): Promise<void> {
   const deadline = Date.now() + maxMinutes * 60_000;
   const optimizer = options.get("optimizer") ?? "adam";
   if (optimizer !== "adam" && optimizer !== "sgd") throw new RangeError("optimizer must be adam or sgd.");
+  const gradientBackend = options.get("gradient-backend") ?? "scalar";
+  if (gradientBackend !== "scalar" && gradientBackend !== "tape") throw new RangeError("gradient-backend must be scalar or tape.");
   if (!Number.isSafeInteger(epochs) || epochs < 1 || epochs > 1000) throw new RangeError("epochs must be an integer between 1 and 1000.");
   if (!Number.isSafeInteger(seed)) throw new RangeError("seed must be a safe integer.");
   if (learningRate <= 0 || learningRate > 0.02) throw new RangeError("learning-rate must be in (0, 0.02].");
@@ -155,7 +157,7 @@ async function main(): Promise<void> {
       const metrics = model.train(window.tokens, learningRate, epochs, 1, optimizer, (progress) => {
         if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit during example ${exampleIndex}/${trainingExamples.length}.`);
         console.error(`[train] example ${exampleIndex}/${trainingExamples.length} window ${windowIndex + 1}/${windows.length} epoch ${progress.epoch}/${progress.epochs}: ${progress.targetsProcessed}/${progress.totalTargets} targets; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
-      }, targetStride, window.targetStartIndex);
+      }, targetStride, window.targetStartIndex, gradientBackend);
       weightedLoss += metrics.loss * metrics.examples;
       trainedTokens += metrics.examples;
       lastGradientNorm = metrics.gradientNorm;
@@ -191,7 +193,7 @@ async function main(): Promise<void> {
       validationAndTestUsedForTraining: false,
     },
     training: {
-      seed, epochsPerExample: epochs, learningRate, optimizer,
+      seed, epochsPerExample: epochs, learningRate, optimizer, gradientBackend,
       resumedFromCheckpoint: initialCheckpointPath ?? null,
       tokenizer: { type: "train-only byte-pair", merges: tokenizer.toJSON().merges.length, vocabSize: tokenizer.vocabSize },
       trainedExamples: trainingExamples.length,
