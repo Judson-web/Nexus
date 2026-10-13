@@ -90,7 +90,7 @@ export class TransformerModel {
     const layerSizes: Record<string, number> = {
       q: e * e, k: e * e, value: e * e, attentionOut: e * e,
       attentionNormScale: e, attentionNormBias: e,
-      ff1: e * f, ff1Bias: f, ff2: f * e, ff2Bias: e,
+      ff1: e * f, ff1Bias: f, ffGate: e * f, ffGateBias: f, ff2: f * e, ff2Bias: e,
       ffNormScale: e, ffNormBias: e,
     };
     for (let layer = 0; layer < layerCount; layer++) {
@@ -148,10 +148,9 @@ export class TransformerModel {
   }
 
   private normalize(input: Float64Array, scale: Float64Array, bias: Float64Array): Float64Array {
-    const mean = input.reduce((sum, x) => sum + x, 0) / input.length;
-    const variance = input.reduce((sum, x) => sum + (x - mean) ** 2, 0) / input.length;
-    const inverse = 1 / Math.sqrt(variance + 1e-5);
-    return Float64Array.from(input, (x, i) => (x - mean) * inverse * scale[i]! + bias[i]!);
+    const meanSquare = input.reduce((sum, x) => sum + x * x, 0) / input.length;
+    const inverse = 1 / Math.sqrt(meanSquare + 1e-5);
+    return Float64Array.from(input, (x, i) => x * inverse * scale[i]! + bias[i]!);
   }
 
   private matVec(input: Float64Array, name: string, outSize: number): Float64Array {
@@ -216,6 +215,8 @@ export class TransformerModel {
       const attentionBias = this.layerVector("attentionNormBias", layer);
       const ff1 = this.layerVector("ff1", layer);
       const ff1Bias = this.layerVector("ff1Bias", layer);
+      const ffGate = this.layerVector("ffGate", layer);
+      const ffGateBias = this.layerVector("ffGateBias", layer);
       const ff2 = this.layerVector("ff2", layer);
       const ff2Bias = this.layerVector("ff2Bias", layer);
       const ffScale = this.layerVector("ffNormScale", layer);
@@ -224,10 +225,15 @@ export class TransformerModel {
         const projected = project(attended[p]!, outMatrix);
         let normalized = this.normalize(Float64Array.from(state, (x, i) => x + projected[i]!), attentionScale, attentionBias);
         const hidden = new Float64Array(this.config.feedForwardSize);
-        for (let i = 0; i < e; i++) for (let j = 0; j < hidden.length; j++) hidden[j] = hidden[j]! + normalized[i]! * ff1[i * hidden.length + j]!;
+        const gate = new Float64Array(this.config.feedForwardSize);
+        for (let i = 0; i < e; i++) for (let j = 0; j < hidden.length; j++) {
+          hidden[j] = hidden[j]! + normalized[i]! * ff1[i * hidden.length + j]!;
+          gate[j] = gate[j]! + normalized[i]! * ffGate[i * hidden.length + j]!;
+        }
         for (let j = 0; j < hidden.length; j++) {
-          const z = hidden[j]! + ff1Bias[j]!;
-          hidden[j] = 0.5 * z * (1 + Math.tanh(Math.sqrt(2 / Math.PI) * (z + 0.044715 * z ** 3)));
+          const value = hidden[j]! + ff1Bias[j]!;
+          const z = gate[j]! + ffGateBias[j]!;
+          hidden[j] = value * (z / (1 + Math.exp(-z)));
         }
         const ffOutput = new Float64Array(e);
         for (let i = 0; i < hidden.length; i++) for (let j = 0; j < e; j++) ffOutput[j] = ffOutput[j]! + hidden[i]! * ff2[i * e + j]!;
