@@ -138,3 +138,17 @@ test("Transformer AdamW applies decoupled weight decay with a cosine schedule", 
   assert.throws(() => new TransformerModel(tinyConfig).train(tokens, 0.001, 1, 1, "adamw", undefined, 1, -0.1), /weightDecay/i);
   assert.throws(() => new TransformerModel(tinyConfig).train(tokens, 0.001, 1, 1, "adam", undefined, 1, 0.01), /only by adamw/i);
 });
+
+test("Transformer checkpoint preserves AdamW moments and exact continuation", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 89 };
+  const tokens = [1, 2, 1, 2, 1, 2, 1, 2];
+  const uninterrupted = new TransformerModel(tinyConfig);
+  uninterrupted.train(tokens, 0.001, 2, 1, "adamw", undefined, 1, 0.01, "cosine");
+  const restored = TransformerModel.fromCheckpoint(uninterrupted.toCheckpoint());
+  uninterrupted.train(tokens, 0.001, 1, 1, "adamw", undefined, 1, 0.01, "cosine");
+  restored.train(tokens, 0.001, 1, 1, "adamw", undefined, 1, 0.01, "cosine");
+  assert.deepEqual(restored.toCheckpoint().weights, uninterrupted.toCheckpoint().weights);
+  assert.deepEqual(restored.toCheckpoint().optimizerState, uninterrupted.toCheckpoint().optimizerState);
+  const malformed = { ...restored.toCheckpoint(), optimizerState: { step: -1, firstMoment: [], secondMoment: [] } };
+  assert.throws(() => TransformerModel.fromCheckpoint(malformed), /optimizer state/i);
+});
