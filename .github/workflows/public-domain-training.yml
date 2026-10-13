@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "feat/large-scale-public-domain-training"
+      - "feat/english-curriculum-context"
       - "feat/generation-quality-coverage"
   workflow_dispatch:
     inputs:
@@ -54,6 +55,7 @@ jobs:
             if (provenance.checkpoint.sha256 !== digest) throw new Error("Checkpoint SHA-256 mismatch");
             if (provenance.dataset.validationAndTestUsedForTraining !== false) throw new Error("Held-out data leakage flag invalid");
             if (provenance.training.trainedExamples !== manifest.splits.train) throw new Error("Actual trained example count differs from train split");
+            if (provenance.training.targetStride !== 2 || provenance.training.maxTokensPerExample !== 512) throw new Error("Expanded token coverage configuration was not used");
             if (provenance.training.targetStride !== 3 || provenance.training.maxTokensPerExample !== 512) throw new Error("Expanded token coverage configuration was not used");
             if (provenance.model.embeddingSize < 16 || provenance.model.contextSize < 32) throw new Error("Scale-up configuration was not used");
             for (const split of ["validation", "test"]) {
