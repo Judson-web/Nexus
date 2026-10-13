@@ -124,3 +124,17 @@ test("Transformer supports deterministic strided target sampling and reports sam
   assert.deepEqual(progress.at(-1), { epoch: 1, epochs: 1, targetsProcessed: 5, totalTargets: 5 });
   assert.throws(() => new TransformerModel(tinyConfig).train(tokens, 0.001, 1, 1, "adam", undefined, 0), /targetStride/);
 });
+
+
+test("Transformer checkpoint preserves Adam state for exact continued-training parity", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 61 };
+  const tokens = [1, 2, 1, 3, 1, 2, 1, 3];
+  const uninterrupted = new TransformerModel(tinyConfig);
+  uninterrupted.train(tokens, 0.001, 2, 1, "adam");
+  const staged = new TransformerModel(tinyConfig);
+  staged.train(tokens, 0.001, 1, 1, "adam");
+  const restored = TransformerModel.fromCheckpoint(staged.toCheckpoint());
+  restored.train(tokens, 0.001, 1, 1, "adam");
+  assert.deepEqual(restored.toCheckpoint().weights, uninterrupted.toCheckpoint().weights);
+  assert.deepEqual(restored.toCheckpoint().optimizerState, uninterrupted.toCheckpoint().optimizerState);
+});
