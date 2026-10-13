@@ -87,6 +87,7 @@ async function fetchSplit(split: "train" | "validation", maxRows: number): Promi
     url.searchParams.set("dataset", DATASET);
     url.searchParams.set("config", "default");
     url.searchParams.set("split", split);
+    url.searchParams.set("revision", REVISION);
     url.searchParams.set("offset", String(offset));
     url.searchParams.set("length", String(Math.min(PAGE_SIZE, maxRows - offset)));
     const response = await fetchWithRetry(url);
