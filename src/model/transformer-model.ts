@@ -257,7 +257,7 @@ export class TransformerModel {
    * single optimizer update. This reference implementation prioritizes correctness
    * and gradient inspectability over training throughput.
    */
-  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void, targetStride = 1): TransformerMetrics {
+  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void, targetStride = 1, targetStartIndex = 1): TransformerMetrics {
     this.validateTokens(tokens);
     checkInteger(epochs, "epochs", 1, 1000);
     if (tokens.length < 2) throw new Error("At least two tokens are required.");
@@ -269,8 +269,9 @@ export class TransformerModel {
     }
     if (optimizer !== "sgd" && optimizer !== "adam") throw new RangeError("optimizer must be sgd or adam.");
     checkInteger(targetStride, "targetStride", 1, 32);
+    checkInteger(targetStartIndex, "targetStartIndex", 1, tokens.length - 1);
     const targetIndices: number[] = [];
-    for (let i = 1; i < tokens.length; i += targetStride) targetIndices.push(i);
+    for (let i = targetStartIndex; i < tokens.length; i += targetStride) targetIndices.push(i);
     if (targetIndices.at(-1) !== tokens.length - 1) targetIndices.push(tokens.length - 1);
     const exampleCount = targetIndices.length;
     let gradientNorm = 0;
