@@ -290,7 +290,7 @@ export class TransformerModel {
       gradientNorm = Math.sqrt(squaredNorm);
       if (!Number.isFinite(gradientNorm)) throw new RangeError("Training produced a non-finite gradient norm.");
       gradientScale = gradientNorm > maxGradientNorm ? maxGradientNorm / gradientNorm : 1;
-      if (optimizer === "adam") this.adamStep += 1;
+      if (optimizer === "adam" || optimizer === "adamw") this.adamStep += 1;
       const beta1 = 0.9;
       const beta2 = 0.999;
       const epsilon = 1e-8;
