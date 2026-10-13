@@ -3,7 +3,7 @@ import { validateDatasetManifest } from "../evaluation/manifest.js";
 import { EOS_TOKEN_ID } from "../tokenizer/byte-tokenizer.js";
 import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
 
-const TRAINING_MAX_TOKENS_PER_EXAMPLE = 192;
+const DEFAULT_MAX_TOKENS_PER_EXAMPLE = 512;
 
 function percentiles(values: readonly number[]) {
   const sorted = [...values].sort((a, b) => a - b);
@@ -13,8 +13,21 @@ function percentiles(values: readonly number[]) {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  if (args.length !== 2 || args[0] !== "--manifest") throw new Error("Usage: npm run audit:tokenizer -- --manifest <path>");
-  const raw = await readFile(args[1]!, "utf8");
+  const options = new Map<string, string>();
+  for (let i = 0; i < args.length; i += 1) {
+    const key = args[i]!;
+    const value = args[i + 1];
+    if (!key.startsWith("--") || !value || value.startsWith("--")) throw new Error("Usage: npm run audit:tokenizer -- --manifest <path> [--max-tokens-per-example <count>]");
+    const name = key.slice(2);
+    if (!["manifest", "max-tokens-per-example"].includes(name) || options.has(name)) throw new Error(`Unknown or duplicate option: ${key}`);
+    options.set(name, value);
+    i += 1;
+  }
+  const manifestPath = options.get("manifest");
+  if (!manifestPath) throw new Error("Missing required option --manifest");
+  const maxTokensPerExample = Number(options.get("max-tokens-per-example") ?? DEFAULT_MAX_TOKENS_PER_EXAMPLE);
+  if (!Number.isSafeInteger(maxTokensPerExample) || maxTokensPerExample < 16 || maxTokensPerExample > 4096) throw new RangeError("max-tokens-per-example must be an integer between 16 and 4096.");
+  const raw = await readFile(manifestPath, "utf8");
   const manifest = validateDatasetManifest(JSON.parse(raw) as unknown);
   const tokenizer = BytePairTokenizer.train(manifest.examples.filter((example) => example.split === "train").map((example) => example.text), 255);
   const summaries = Object.fromEntries((["train", "validation", "test"] as const).map((split) => {
@@ -22,7 +35,7 @@ async function main(): Promise<void> {
     const tokenLengths = examples.map((example) => tokenizer.encode(example.text, false).length);
     const codePointLengths = examples.map((example) => Array.from(example.text).length);
     const targetLengthsIncludingEos = tokenLengths.map((length) => length + 1);
-    const truncatedTokens = targetLengthsIncludingEos.map((length) => Math.max(0, length - TRAINING_MAX_TOKENS_PER_EXAMPLE));
+    const truncatedTokens = targetLengthsIncludingEos.map((length) => Math.max(0, length - maxTokensPerExample));
     const utf8Bytes = examples.reduce((sum, example) => sum + Buffer.byteLength(example.text, "utf8"), 0);
     const encodedTokens = examples.reduce((sum, example) => sum + tokenizer.encode(example.text, false).length, 0);
     const eosTargets = examples.length;
@@ -34,7 +47,7 @@ async function main(): Promise<void> {
       unicodeCodePoints: codePointLengths.reduce((sum, n) => sum + n, 0),
       tokensPerCodePoint: codePointLengths.reduce((sum, n) => sum + n, 0) === 0 ? 0 : encodedTokens / codePointLengths.reduce((sum, n) => sum + n, 0),
       sequenceTokens: percentiles(tokenLengths),
-      trainingMaxTokensPerExample: TRAINING_MAX_TOKENS_PER_EXAMPLE,
+      trainingMaxTokensPerExample: maxTokensPerExample,
       examplesExceedingTrainingLimit: truncatedTokens.filter((count) => count > 0).length,
       estimatedTruncatedTokens: truncatedTokens.reduce((sum, count) => sum + count, 0),
       nextTokenTargetsIncludingEos: encodedTokens + eosTargets,
@@ -46,7 +59,7 @@ async function main(): Promise<void> {
     tokenizer: { type: "train-only byte-pair", vocabularySize: tokenizer.vocabSize, eosTokenId: EOS_TOKEN_ID, merges: tokenizer.toJSON().merges.length, learnedVocabulary: true, trainingSplitOnly: true },
     dataset: { acceptedExamples: manifest.acceptedExamples, splits: manifest.splits, sourceSha256: manifest.sourceSha256, preparedSha256: manifest.preparedSha256 },
     splits: summaries,
-    interpretation: "The tokenizer is learned from training examples only. Compare token-to-byte ratio, sequence-token percentiles, and estimated truncation at the current 192-token training cap. Compression does not itself establish semantic quality; these diagnostics do not change training data.",
+    interpretation: "The tokenizer is learned from training examples only. Compare token-to-byte ratio, sequence-token percentiles, and estimated truncation at the configured training token cap. Compression does not itself establish semantic quality; these diagnostics do not change training data.",
   };
   console.log(JSON.stringify(report, null, 2));
 }
