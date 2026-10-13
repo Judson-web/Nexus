@@ -16,7 +16,7 @@ async function main(): Promise<void> {
   if (args.length !== 2 || args[0] !== "--manifest") throw new Error("Usage: npm run audit:tokenizer -- --manifest <path>");
   const raw = await readFile(args[1]!, "utf8");
   const manifest = validateDatasetManifest(JSON.parse(raw) as unknown);
-  const tokenizer = BytePairTokenizer.train(manifest.examples.filter((example) => example.split === "train").map((example) => example.text), 255);
+  const tokenizer = BytePairTokenizer.train(manifest.examples.filter((example) => example.split === "train").map((example) => example.text), 767);
   const summaries = Object.fromEntries((["train", "validation", "test"] as const).map((split) => {
     const examples = manifest.examples.filter((example) => example.split === split);
     const tokenLengths = examples.map((example) => tokenizer.encode(example.text, false).length);
