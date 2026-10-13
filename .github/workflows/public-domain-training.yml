@@ -24,7 +24,7 @@ on:
 permissions:
   contents: read
 
-# New commits supersede stale, queued matrix runs; each retained run still fans out into four candidates.
+# Workflow edits start a fresh matrix; ordinary source/doc commits leave long-running candidates alone.
 concurrency:
   group: nexus-english-training-${{ github.ref }}
   cancel-in-progress: true
@@ -98,9 +98,9 @@ jobs:
             gradient_backend: tape
           - name: context64-tape-wide
             context_size: 64
-            embedding_size: 24
+            embedding_size: 32
             heads: 4
-            feed_forward_size: 96
+            feed_forward_size: 128
             learning_rate: "0.0003"
             target_stride: 2
             gradient_backend: tape
@@ -113,6 +113,14 @@ jobs:
             target_stride: 2
             gradient_backend: tape
             data_order: length-cyclic
+          - name: context128-tape
+            context_size: 128
+            embedding_size: 16
+            heads: 4
+            feed_forward_size: 64
+            learning_rate: "0.0003"
+            target_stride: 2
+            gradient_backend: tape
     name: Train ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
