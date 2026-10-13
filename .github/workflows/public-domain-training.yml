@@ -60,34 +60,38 @@ jobs:
       max-parallel: 4
       matrix:
         include:
-          - name: context32-baseline
+          - name: context32-scalar
             context_size: 32
             embedding_size: 16
             heads: 4
             feed_forward_size: 64
             learning_rate: "0.0003"
             target_stride: 2
-          - name: context64-baseline
+            gradient_backend: scalar
+          - name: context32-tape
+            context_size: 32
+            embedding_size: 16
+            heads: 4
+            feed_forward_size: 64
+            learning_rate: "0.0003"
+            target_stride: 2
+            gradient_backend: tape
+          - name: context64-scalar
             context_size: 64
             embedding_size: 16
             heads: 4
             feed_forward_size: 64
             learning_rate: "0.0003"
             target_stride: 2
-          - name: context64-lower-lr
+            gradient_backend: scalar
+          - name: context64-tape
             context_size: 64
             embedding_size: 16
             heads: 4
             feed_forward_size: 64
-            learning_rate: "0.0001"
-            target_stride: 2
-          - name: context64-wider
-            context_size: 64
-            embedding_size: 24
-            heads: 4
-            feed_forward_size: 96
             learning_rate: "0.0003"
             target_stride: 2
+            gradient_backend: tape
     name: Train ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -109,6 +113,7 @@ jobs:
           --epochs "${{ inputs.epochs || '1' }}"
           --seed 17
           --optimizer adam
+          --gradient-backend ${{ matrix.gradient_backend }}
           --context-size ${{ matrix.context_size }}
           --embedding-size ${{ matrix.embedding_size }}
           --heads ${{ matrix.heads }}
