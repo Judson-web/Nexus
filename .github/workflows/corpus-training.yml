@@ -9,7 +9,7 @@ on:
       documents:
         description: "Number of eligible CC0 abstracts to acquire (3-1000)"
         required: true
-        default: "300"
+        default: "500"
         type: string
       max_rows:
         description: "Maximum dataset-viewer rows to scan (100-20000)"
@@ -19,7 +19,7 @@ on:
       epochs:
         description: "Training epochs per example (start small)"
         required: true
-        default: "1"
+        default: "2"
         type: string
       seed:
         description: "Deterministic model seed"
@@ -43,15 +43,15 @@ jobs:
       - run: npm run check
       - run: npm test
       - name: Acquire bounded, provenance-checked CC0 corpus
-        run: npm run acquire:common-pile -- --documents "${{ inputs.documents || '300' }}" --max-rows "${{ inputs.max_rows || '20000' }}" --output artifacts/common-pile-arxiv-abstracts
+        run: npm run acquire:common-pile -- --documents "${{ inputs.documents || '500' }}" --max-rows "${{ inputs.max_rows || '20000' }}" --output artifacts/common-pile-arxiv-abstracts
       - name: Build split-preserving training manifest
         run: npm run prepare:dataset:source-splits -- --train artifacts/common-pile-arxiv-abstracts/train.txt --validation artifacts/common-pile-arxiv-abstracts/validation.txt --test artifacts/common-pile-arxiv-abstracts/test.txt --source-name "Common Pile arXiv abstracts" --source-url "https://huggingface.co/datasets/common-pile/arxiv_abstracts" --license "CC0 (record-level metadata checked; see acquisition manifest)" --attribution "Common Pile arXiv abstracts; source URLs and authors in acquisition manifest" --output artifacts/dataset-manifest.json
       - name: Audit tokenizer coverage and sequence lengths
-        run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/dataset-manifest.json > artifacts/tokenizer-audit.json
-      - name: Train the first larger-corpus Transformer candidate
+        run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/dataset-manifest.json --max-tokens-per-example 384 > artifacts/tokenizer-audit.json
+      - name: Train the scaled Transformer candidate
         run: |
           set -euo pipefail
-          npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-first-real-run.json" --epochs "${{ inputs.epochs || '1' }}" --seed "${{ inputs.seed || '17' }}" --optimizer adam --context-size 16 --embedding-size 8 --heads 2 --feed-forward-size 16 --learning-rate 0.0006 --max-minutes 35 --max-tokens-per-example 512 --target-stride 2
+          npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --output "artifacts/transformer-first-real-run.json" --epochs "${{ inputs.epochs || '2' }}" --seed "${{ inputs.seed || '17' }}" --optimizer adam --context-size 24 --embedding-size 12 --heads 3 --feed-forward-size 32 --learning-rate 0.0004 --max-minutes 38 --max-tokens-per-example 384 --target-stride 4
       - name: Verify checkpoint and held-out metrics
         run: |
           set -euo pipefail
@@ -59,6 +59,8 @@ jobs:
             import { readFileSync, writeFileSync } from "node:fs";
             import { createHash } from "node:crypto";
             const manifest = JSON.parse(readFileSync("artifacts/dataset-manifest.json", "utf8"));
+            const audit = JSON.parse(readFileSync("artifacts/tokenizer-audit.json", "utf8"));
+            if (audit.trainingLimit !== 384) throw new Error("Tokenizer audit/trainer token-cap mismatch");
             const path = "artifacts/transformer-first-real-run.json";
             const provenance = JSON.parse(readFileSync(path + ".provenance.json", "utf8"));
             const checkpoint = readFileSync(path);
@@ -120,7 +122,7 @@ jobs:
           '
       - uses: actions/upload-artifact@v4
         with:
-          name: nexus-first-real-training-${{ github.run_id }}
+          name: nexus-scaled-training-${{ github.run_id }}
           path: |
             artifacts/common-pile-arxiv-abstracts/
             artifacts/dataset-manifest.json
