@@ -15,7 +15,7 @@ function parseArgs(args: string[]): Map<string, string> {
     const value = args[i + 1];
     if (!value || value.startsWith("--")) throw new Error(`Missing value for ${key}`);
     if (options.has(name)) throw new Error(`Duplicate option: ${key}`);
-    if (!["manifest", "output", "resume-from", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "schedule", "weight-decay", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
+    if (!["manifest", "output", "resume-from", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "layer-count", "optimizer", "schedule", "weight-decay", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
       throw new Error(`Unknown option: ${key}`);
     }
     options.set(name, value);
@@ -107,6 +107,7 @@ async function main(): Promise<void> {
     embeddingSize: numeric(options, "embedding-size", 4),
     headCount: numeric(options, "heads", 2),
     feedForwardSize: numeric(options, "feed-forward-size", 8),
+    layerCount: numeric(options, "layer-count", 2),
     seed,
   };
   // A resume checkpoint pins both the tokenizer and exact dataset/training configuration.

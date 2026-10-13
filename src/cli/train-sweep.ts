@@ -8,6 +8,7 @@ interface Candidate {
   readonly contextSize: number;
   readonly embeddingSize: number;
   readonly heads: number;
+  readonly layers: number;
   readonly feedForwardSize: number;
   readonly learningRate: number;
   readonly optimizer: "adamw" | "adam" | "sgd";
@@ -56,6 +57,7 @@ function runCandidate(candidate: Candidate, options: Map<string, string>, manife
       "--context-size", String(candidate.contextSize),
       "--embedding-size", String(candidate.embeddingSize),
       "--heads", String(candidate.heads),
+      "--layer-count", String(candidate.layers),
       "--feed-forward-size", String(candidate.feedForwardSize),
       "--learning-rate", String(candidate.learningRate),
       "--optimizer", candidate.optimizer,
@@ -115,10 +117,10 @@ async function main(): Promise<void> {
   // Small, deliberately diverse candidates. Increase model sizes only after the
   // local CPU profiler confirms that the available memory/compute can sustain it.
   const candidates: Candidate[] = [
-    { name: "adam-context8", seed, contextSize: 8, embeddingSize: 8, heads: 2, feedForwardSize: 16, learningRate: 0.0003, optimizer: "adamw" },
-    { name: "adam-context16", seed: seed + 1, contextSize: 16, embeddingSize: 8, heads: 2, feedForwardSize: 16, learningRate: 0.0003, optimizer: "adamw" },
-    { name: "adam-wider", seed: seed + 2, contextSize: 12, embeddingSize: 12, heads: 3, feedForwardSize: 24, learningRate: 0.0002, optimizer: "adam" },
-    { name: "sgd-control", seed: seed + 3, contextSize: 8, embeddingSize: 8, heads: 2, feedForwardSize: 16, learningRate: 0.0001, optimizer: "sgd" },
+    { name: "adam-context8", seed, contextSize: 8, embeddingSize: 8, heads: 2, layers: 2, feedForwardSize: 16, learningRate: 0.0003, optimizer: "adamw" },
+    { name: "adam-context32", seed: seed + 1, contextSize: 32, embeddingSize: 8, heads: 2, layers: 2, feedForwardSize: 16, learningRate: 0.0003, optimizer: "adamw" },
+    { name: "adam-wider", seed: seed + 2, contextSize: 12, embeddingSize: 12, heads: 3, layers: 2, feedForwardSize: 24, learningRate: 0.0002, optimizer: "adam" },
+    { name: "sgd-control", seed: seed + 3, contextSize: 8, embeddingSize: 8, heads: 2, layers: 1, feedForwardSize: 16, learningRate: 0.0001, optimizer: "sgd" },
   ];
   const results: RunResult[] = new Array(candidates.length);
   let nextIndex = 0;

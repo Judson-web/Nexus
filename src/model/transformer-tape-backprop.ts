@@ -14,7 +14,8 @@ export function transformerTapeLossAndGradients(
 ): TransformerGradientResult {
   const { vocabSize: v, contextSize: c, embeddingSize: e, headCount } = config;
   const f = config.feedForwardSize;
-  const expectedLength = v * e + c * e + 4 * e * e + 4 * e + e * f + f + f * e + e + e * v + v;
+  if ((config.layerCount ?? 1) !== 1) throw new RangeError("Typed-array tape currently supports one Transformer layer.");
+  const expectedLength = v * e + c * e + 4 * e * e + 5 * e + 3 * e * f + 2 * f + e * v + v;
   if (weights.length !== expectedLength) throw new RangeError("Transformer weight vector length mismatch.");
   if (!Number.isSafeInteger(target) || target < 0 || target >= v) throw new RangeError("Target token is out of range.");
   if (context.some((token) => !Number.isSafeInteger(token) || token < 0 || token >= v)) {
@@ -50,6 +51,8 @@ export function transformerTapeLossAndGradients(
   const attentionBias = take(e);
   const ff1 = take(e * f);
   const ff1Bias = take(f);
+  const ffGate = take(e * f);
+  const ffGateBias = take(f);
   const ff2 = take(f * e);
   const ff2Bias = take(e);
   const ffScale = take(e);
@@ -69,12 +72,10 @@ export function transformerTapeLossAndGradients(
     return out;
   };
   const normalize = (input: readonly number[], scale: readonly number[], bias: readonly number[]): number[] => {
-    let mean = zero();
-    for (const x of input) mean = add(mean, div(x, constant(input.length)));
-    let variance = zero();
-    for (const x of input) variance = add(variance, div(pow(sub(x, mean), 2), constant(input.length)));
-    const inverse = pow(add(variance, constant(1e-5)), -0.5);
-    return input.map((x, i) => add(mul(mul(sub(x, mean), inverse), scale[i]!), bias[i]!));
+    let meanSquare = zero();
+    for (const x of input) meanSquare = add(meanSquare, div(pow(x, 2), constant(input.length)));
+    const inverse = pow(add(meanSquare, constant(1e-5)), -0.5);
+    return input.map((x, i) => add(mul(mul(x, inverse), scale[i]!), bias[i]!));
   };
   const tail = context.slice(-c);
   const padded = [...new Array<number>(c - tail.length).fill(0), ...tail];
@@ -117,10 +118,13 @@ export function transformerTapeLossAndGradients(
   const projected = dotProjection(attended, attentionOut, e);
   let state = normalize(states[last]!.map((x, i) => add(x, projected[i]!)), attentionScale, attentionBias);
   const hidden = Array.from({ length: f }, (_, j) => {
-    let z = ff1Bias[j]!;
-    for (let i = 0; i < e; i++) z = add(z, mul(state[i]!, ff1[i * f + j]!));
-    const inner = mul(add(z, mul(pow(z, 3), constant(0.044715))), constant(Math.sqrt(2 / Math.PI)));
-    return mul(mul(z, constant(0.5)), add(tanh(inner), constant(1)));
+    let value = ff1Bias[j]!;
+    let gate = ffGateBias[j]!;
+    for (let i = 0; i < e; i++) {
+      value = add(value, mul(state[i]!, ff1[i * f + j]!));
+      gate = add(gate, mul(state[i]!, ffGate[i * f + j]!));
+    }
+    return mul(value, div(gate, add(exp(mul(gate, constant(-1))), constant(1))));
   });
   const ffOutput = dotProjection(hidden, ff2, e).map((x, i) => add(x, ff2Bias[i]!));
   state = normalize(state.map((x, i) => add(x, ffOutput[i]!)), ffScale, ffBias);

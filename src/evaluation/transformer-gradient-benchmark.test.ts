@@ -4,7 +4,7 @@ import { benchmarkTransformerGradients } from "./transformer-gradient-benchmark.
 
 test("gradient benchmark reports deterministic inputs and numerical parity", () => {
   const options = { repeats: 3, warmups: 0, examples: 3, config: {
-    vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 19,
+    vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, layerCount: 1, seed: 19,
   } };
   const first = benchmarkTransformerGradients(options);
   const second = benchmarkTransformerGradients(options);

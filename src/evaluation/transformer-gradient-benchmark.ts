@@ -31,7 +31,7 @@ export function benchmarkTransformerGradients(options: TransformerGradientBenchm
       throw new RangeError(`${name} must be an integer in [${min}, ${max}].`);
     }
   }
-  const config: TransformerConfig = { ...DEFAULT_TRANSFORMER_CONFIG, ...options.config };
+  const config: TransformerConfig = { ...DEFAULT_TRANSFORMER_CONFIG, ...options.config, layerCount: options.config?.layerCount ?? 1 };
   if (config.vocabSize < 8 || config.contextSize < 1 || config.embeddingSize < 2 ||
       !Number.isInteger(config.headCount) || config.headCount < 1 ||
       config.embeddingSize % config.headCount !== 0 || config.feedForwardSize < 1) {
