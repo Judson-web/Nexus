@@ -1,10 +1,13 @@
-name: Nexus public-domain full-text training
+name: Nexus English curriculum training experiments
 
 on:
+  # Expensive matrix runs start only when the training workflow itself changes.
+  # Normal code commits are covered by TypeScript CI and do not restart hours-long experiments.
   push:
     branches:
-      - "feat/large-scale-public-domain-training"
-      - "feat/generation-quality-coverage"
+      - "feat/english-curriculum-context"
+    paths:
+      - ".github/workflows/public-domain-training.yml"
   workflow_dispatch:
     inputs:
       paragraphs_per_book:
@@ -21,10 +24,15 @@ on:
 permissions:
   contents: read
 
+# Workflow edits start a fresh matrix; ordinary source/doc commits leave long-running candidates alone.
+concurrency:
+  group: nexus-english-training-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  acquire-train-evaluate:
+  prepare-corpus:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,14 +47,122 @@ jobs:
         run: npm run prepare:dataset:source-splits -- --train artifacts/public-domain-books/train.txt --validation artifacts/public-domain-books/validation.txt --test artifacts/public-domain-books/test.txt --source-name "Project Gutenberg public-domain books" --source-url "https://www.gutenberg.org/" --license "Curated US public-domain works; see per-work metadata in acquisition manifest" --attribution "Project Gutenberg ebook IDs, titles, authors, and text hashes in acquisition manifest" --output artifacts/public-domain-manifest.json
       - name: Audit corpus and tokenizer coverage
         run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/public-domain-manifest.json > artifacts/tokenizer-audit.json
-      - name: Train the model on the full-text corpus
-        run: npm run train:transformer:manifest -- --manifest artifacts/public-domain-manifest.json --output artifacts/nexus-public-domain-candidate.json --epochs "${{ inputs.epochs || '1' }}" --seed 17 --optimizer adam --context-size 32 --embedding-size 16 --heads 4 --feed-forward-size 64 --learning-rate 0.0003 --max-minutes 300 --max-tokens-per-example 512 --target-stride 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-english-corpus-${{ github.run_id }}
+          path: |
+            artifacts/public-domain-books/
+            artifacts/public-domain-manifest.json
+            artifacts/tokenizer-audit.json
+          if-no-files-found: error
+          retention-days: 1
+
+  train-experiments:
+    needs: prepare-corpus
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - name: context32-scalar-baseline
+            context_size: 32
+            embedding_size: 16
+            heads: 4
+            feed_forward_size: 64
+            learning_rate: "0.0003"
+            target_stride: 2
+            gradient_backend: scalar
+          - name: context32-tape-baseline
+            context_size: 32
+            embedding_size: 16
+            heads: 4
+            feed_forward_size: 64
+            learning_rate: "0.0003"
+            target_stride: 2
+            gradient_backend: tape
+          - name: context64-tape-baseline
+            context_size: 64
+            embedding_size: 16
+            heads: 4
+            feed_forward_size: 64
+            learning_rate: "0.0003"
+            target_stride: 2
+            gradient_backend: tape
+          - name: context64-tape-low-lr
+            context_size: 64
+            embedding_size: 16
+            heads: 4
+            feed_forward_size: 64
+            learning_rate: "0.0001"
+            target_stride: 2
+            gradient_backend: tape
+          - name: context64-tape-wide
+            context_size: 64
+            embedding_size: 32
+            heads: 4
+            feed_forward_size: 128
+            learning_rate: "0.0003"
+            target_stride: 2
+            gradient_backend: tape
+          - name: context64-tape-length-cyclic
+            context_size: 64
+            embedding_size: 16
+            heads: 4
+            feed_forward_size: 64
+            learning_rate: "0.0003"
+            target_stride: 2
+            gradient_backend: tape
+            data_order: length-cyclic
+          - name: context128-tape
+            context_size: 128
+            embedding_size: 16
+            heads: 4
+            feed_forward_size: 64
+            learning_rate: "0.0003"
+            target_stride: 2
+            gradient_backend: tape
+    name: Train ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        with:
+          name: nexus-english-corpus-${{ github.run_id }}
+          path: artifacts
+      - name: Train independent candidate
+        run: >-
+          npm run train:transformer:manifest --
+          --manifest artifacts/public-domain-manifest.json
+          --output artifacts/nexus-${{ matrix.name }}.json
+          --epochs "${{ inputs.epochs || '1' }}"
+          --seed 17
+          --optimizer adam
+          --gradient-backend ${{ matrix.gradient_backend }}
+          --data-order "${{ matrix.data_order || 'manifest' }}"
+          --context-size ${{ matrix.context_size }}
+          --embedding-size ${{ matrix.embedding_size }}
+          --heads ${{ matrix.heads }}
+          --feed-forward-size ${{ matrix.feed_forward_size }}
+          --learning-rate ${{ matrix.learning_rate }}
+          --max-minutes 300
+          --max-tokens-per-example 512
+          --target-stride ${{ matrix.target_stride }}
       - name: Verify provenance and held-out metrics
+        env:
+          CANDIDATE: artifacts/nexus-${{ matrix.name }}.json
+          EXPECTED_CONTEXT: ${{ matrix.context_size }}
+          EXPECTED_EMBEDDING: ${{ matrix.embedding_size }}
+          EXPECTED_STRIDE: ${{ matrix.target_stride }}
         run: |
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
             import { createHash } from "node:crypto";
-            const path = "artifacts/nexus-public-domain-candidate.json";
+            const path = process.env.CANDIDATE;
             const checkpoint = readFileSync(path);
             const digest = createHash("sha256").update(checkpoint).digest("hex");
             const provenance = JSON.parse(readFileSync(path + ".provenance.json", "utf8"));
@@ -54,13 +170,14 @@ jobs:
             if (provenance.checkpoint.sha256 !== digest) throw new Error("Checkpoint SHA-256 mismatch");
             if (provenance.dataset.validationAndTestUsedForTraining !== false) throw new Error("Held-out data leakage flag invalid");
             if (provenance.training.trainedExamples !== manifest.splits.train) throw new Error("Actual trained example count differs from train split");
-            if (provenance.training.targetStride !== 3 || provenance.training.maxTokensPerExample !== 512) throw new Error("Expanded token coverage configuration was not used");
-            if (provenance.model.embeddingSize < 16 || provenance.model.contextSize < 32) throw new Error("Scale-up configuration was not used");
+            if (provenance.training.targetStride !== Number(process.env.EXPECTED_STRIDE) || provenance.training.maxTokensPerExample !== 512) throw new Error("Training token coverage configuration mismatch");
+            if (provenance.model.embeddingSize !== Number(process.env.EXPECTED_EMBEDDING) || provenance.model.contextSize !== Number(process.env.EXPECTED_CONTEXT)) throw new Error("Model scale configuration mismatch");
             for (const split of ["validation", "test"]) {
               const score = provenance.heldOutEvaluation[split];
               if (!Number.isFinite(score.negativeLogLikelihood) || !Number.isFinite(score.perplexity) || score.tokens < 1) throw new Error("Invalid held-out score: " + split);
             }
             writeFileSync("artifacts/training-summary.json", JSON.stringify({
+              experiment: process.env.CANDIDATE,
               dataset: manifest.dataset,
               trainSplit: manifest.splits.train,
               validationSplit: manifest.splits.validation,
@@ -69,27 +186,25 @@ jobs:
               model: provenance.model,
               heldOutEvaluation: provenance.heldOutEvaluation,
               checkpointSha256: digest,
-              generatedTextRequiredForPromotion: true,
+              generatedTextRequiredForPromotion: true
             }, null, 2) + "\n");
             console.log(readFileSync("artifacts/training-summary.json", "utf8"));
           '
       - name: Generate samples for human-readable quality review
         run: |
           mkdir -p artifacts/generation-samples
-          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/nexus-public-domain-candidate.json --prompt "It was a dark and stormy night" --tokens 160 > artifacts/generation-samples/story.txt
-          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/nexus-public-domain-candidate.json --prompt "The natural world" --tokens 160 > artifacts/generation-samples/nature.txt
-          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/nexus-public-domain-candidate.json --prompt "The meaning of knowledge" --tokens 160 > artifacts/generation-samples/knowledge.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/nexus-${{ matrix.name }}.json --prompt "It was a dark and stormy night" --tokens 160 > artifacts/generation-samples/story.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/nexus-${{ matrix.name }}.json --prompt "The natural world" --tokens 160 > artifacts/generation-samples/nature.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/nexus-${{ matrix.name }}.json --prompt "The meaning of knowledge" --tokens 160 > artifacts/generation-samples/knowledge.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: nexus-public-domain-fulltext-${{ github.run_id }}
+          name: nexus-training-${{ matrix.name }}-${{ github.run_id }}
           path: |
-            artifacts/public-domain-books/
-            artifacts/public-domain-manifest.json
-            artifacts/nexus-public-domain-candidate.json
-            artifacts/nexus-public-domain-candidate.json.sha256
-            artifacts/nexus-public-domain-candidate.json.provenance.json
-            artifacts/tokenizer-audit.json
+            artifacts/nexus-${{ matrix.name }}.json
+            artifacts/nexus-${{ matrix.name }}.json.sha256
+            artifacts/nexus-${{ matrix.name }}.json.provenance.json
             artifacts/training-summary.json
+            artifacts/tokenizer-audit.json
             artifacts/generation-samples/
           if-no-files-found: error
           retention-days: 30

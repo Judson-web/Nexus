@@ -3,8 +3,11 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { validateDatasetManifest } from "../evaluation/manifest.js";
 import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel } from "../model/transformer-model.js";
+import type { TransformerCheckpoint } from "../model/transformer-model.js";
 import { EOS_TOKEN_ID } from "../tokenizer/byte-tokenizer.js";
 import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
+import { makeOverlappingTokenWindows } from "../training/token-windows.js";
+import { orderTrainingExamples } from "../training/data-ordering.js";
 
 function parseArgs(args: string[]): Map<string, string> {
   const options = new Map<string, string>();
@@ -15,7 +18,7 @@ function parseArgs(args: string[]): Map<string, string> {
     const value = args[i + 1];
     if (!value || value.startsWith("--")) throw new Error(`Missing value for ${key}`);
     if (options.has(name)) throw new Error(`Duplicate option: ${key}`);
-    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
+    if (!["manifest", "output", "initial-checkpoint", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "gradient-backend", "data-order", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
       throw new Error(`Unknown option: ${key}`);
     }
     options.set(name, value);
@@ -86,6 +89,8 @@ async function main(): Promise<void> {
   const deadline = Date.now() + maxMinutes * 60_000;
   const optimizer = options.get("optimizer") ?? "adam";
   if (optimizer !== "adam" && optimizer !== "sgd") throw new RangeError("optimizer must be adam or sgd.");
+  const gradientBackend = options.get("gradient-backend") ?? "scalar";
+  if (gradientBackend !== "scalar" && gradientBackend !== "tape") throw new RangeError("gradient-backend must be scalar or tape.");
   if (!Number.isSafeInteger(epochs) || epochs < 1 || epochs > 1000) throw new RangeError("epochs must be an integer between 1 and 1000.");
   if (!Number.isSafeInteger(seed)) throw new RangeError("seed must be a safe integer.");
   if (learningRate <= 0 || learningRate > 0.02) throw new RangeError("learning-rate must be in (0, 0.02].");
@@ -103,13 +108,42 @@ async function main(): Promise<void> {
     feedForwardSize: numeric(options, "feed-forward-size", 8),
     seed,
   };
+  // A resumed run must reuse the checkpoint tokenizer; never silently remap token IDs.
+  const initialCheckpointPath = options.get("initial-checkpoint");
+  let initialCheckpoint: TransformerCheckpoint | undefined;
+  if (initialCheckpointPath) {
+    initialCheckpoint = JSON.parse(await readFile(initialCheckpointPath, "utf8")) as TransformerCheckpoint;
+    if (!initialCheckpoint.tokenizer) throw new Error("Initial checkpoint has no embedded tokenizer; refusing unsafe resume.");
+  }
   // Learn merges from training text only; held-out text never influences token IDs.
-  const tokenizer = BytePairTokenizer.train(trainingExamples.map((example) => example.text), 255);
+  const tokenizer = initialCheckpoint?.tokenizer
+    ? new BytePairTokenizer(initialCheckpoint.tokenizer)
+    : BytePairTokenizer.train(trainingExamples.map((example) => example.text), 255);
   const modelConfig = { ...config, vocabSize: tokenizer.vocabSize };
-  const model = new TransformerModel(modelConfig);
+  if (initialCheckpoint && (
+    initialCheckpoint.config.vocabSize !== modelConfig.vocabSize
+    || initialCheckpoint.config.contextSize !== modelConfig.contextSize
+    || initialCheckpoint.config.embeddingSize !== modelConfig.embeddingSize
+    || initialCheckpoint.config.headCount !== modelConfig.headCount
+    || initialCheckpoint.config.feedForwardSize !== modelConfig.feedForwardSize
+  )) {
+    throw new Error("Initial checkpoint architecture differs from requested config; use matching dimensions when resuming.");
+  }
+  const model = initialCheckpoint
+    ? TransformerModel.fromCheckpoint(initialCheckpoint)
+    : new TransformerModel(modelConfig);
+  const dataOrder = options.get("data-order") ?? "manifest";
+  if (dataOrder !== "manifest" && dataOrder !== "length-cyclic") throw new RangeError("data-order must be manifest or length-cyclic.");
+  const orderedTrainingExamples = orderTrainingExamples(
+    trainingExamples,
+    (text) => tokenizer.encode(text, false).length,
+    dataOrder,
+  );
   let weightedLoss = 0;
   let trainedTokens = 0;
   let truncatedExamples = 0;
+  let totalEncodedTokens = 0;
+  let trainingWindowCount = 0;
   let lastGradientNorm = 0;
   let lastGradientScale = 1;
 
@@ -117,26 +151,26 @@ async function main(): Promise<void> {
   // passed to train(); validation and test text are provenance-only here.
   let exampleIndex = 0;
   const startedAt = Date.now();
-  for (const example of trainingExamples) {
+  for (const example of orderedTrainingExamples) {
     exampleIndex += 1;
     if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit before example ${exampleIndex}/${trainingExamples.length}.`);
-    let tokens = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
-    if (tokens.length > maxTokensPerExample) {
-      // Keep a deterministic prefix and restore EOS so each bounded training
-      // sequence has a valid terminal target rather than a random cut-off.
-      tokens = [...tokens.slice(0, maxTokensPerExample - 1), EOS_TOKEN_ID];
-      truncatedExamples += 1;
-    }
+    const tokens = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
+    totalEncodedTokens += tokens.length;
     if (tokens.length < 2) continue;
-    console.error(`[train] example ${exampleIndex}/${trainingExamples.length}; targets=${tokens.length - 1}; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
-    const metrics = model.train(tokens, learningRate, epochs, 1, optimizer, (progress) => {
-      if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit during example ${exampleIndex}/${trainingExamples.length}.`);
-      console.error(`[train] example ${exampleIndex}/${trainingExamples.length} epoch ${progress.epoch}/${progress.epochs}: ${progress.targetsProcessed}/${progress.totalTargets} targets; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
-    }, targetStride);
-    weightedLoss += metrics.loss * metrics.examples;
-    trainedTokens += metrics.examples;
-    lastGradientNorm = metrics.gradientNorm;
-    lastGradientScale = metrics.gradientScale;
+    const windows = makeOverlappingTokenWindows(tokens, maxTokensPerExample, Math.min(config.contextSize, maxTokensPerExample - 1));
+    trainingWindowCount += windows.length;
+    console.error(`[train] example ${exampleIndex}/${trainingExamples.length}; tokens=${tokens.length}; windows=${windows.length}; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
+    for (const [windowIndex, window] of windows.entries()) {
+      if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit during example ${exampleIndex}/${trainingExamples.length}, window ${windowIndex + 1}/${windows.length}.`);
+      const metrics = model.train(window.tokens, learningRate, epochs, 1, optimizer, (progress) => {
+        if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit during example ${exampleIndex}/${trainingExamples.length}.`);
+        console.error(`[train] example ${exampleIndex}/${trainingExamples.length} window ${windowIndex + 1}/${windows.length} epoch ${progress.epoch}/${progress.epochs}: ${progress.targetsProcessed}/${progress.totalTargets} targets; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
+      }, targetStride, window.targetStartIndex, gradientBackend);
+      weightedLoss += metrics.loss * metrics.examples;
+      trainedTokens += metrics.examples;
+      lastGradientNorm = metrics.gradientNorm;
+      lastGradientScale = metrics.gradientScale;
+    }
   }
   if (trainedTokens === 0) throw new Error("Training examples contain no usable next-token targets.");
 
@@ -163,16 +197,21 @@ async function main(): Promise<void> {
       preparedSha256: manifest.preparedSha256,
       splitSeed: manifest.splitSeed,
       splitCounts: manifest.splits,
-      trainingExampleIds: trainingExamples.map((example) => example.id),
+      trainingExampleIds: orderedTrainingExamples.map((example) => example.id),
       validationAndTestUsedForTraining: false,
     },
     training: {
-      seed, epochsPerExample: epochs, learningRate, optimizer,
+      seed, epochsPerExample: epochs, learningRate, optimizer, gradientBackend, dataOrder,
+      resumedFromCheckpoint: initialCheckpointPath ?? null,
       tokenizer: { type: "train-only byte-pair", merges: tokenizer.toJSON().merges.length, vocabSize: tokenizer.vocabSize },
       trainedExamples: trainingExamples.length,
       maxTokensPerExample,
       targetStride,
       truncatedExamples,
+      totalEncodedTokens,
+      trainingWindowCount,
+      droppedTokens: 0,
+      truncatedTokens: 0,
       trainedNextTokenTargets: trainedTokens,
       meanFinalTrainingLoss: weightedLoss / trainedTokens,
       lastGradientNorm, lastGradientScale,

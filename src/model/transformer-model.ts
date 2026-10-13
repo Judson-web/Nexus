@@ -1,5 +1,6 @@
 import { SeededRandom } from "../core/random.js";
 import { transformerLossAndGradients } from "./transformer-backprop.js";
+import { transformerTapeLossAndGradients } from "./transformer-tape-backprop.js";
 import type { BytePairTokenizerData } from "../tokenizer/byte-pair-tokenizer.js";
 
 export interface TransformerConfig {
@@ -16,10 +17,17 @@ export interface TransformerCheckpoint {
   readonly version: 1;
   readonly config: TransformerConfig;
   readonly weights: number[];
+  readonly optimizerState?: {
+    readonly kind: "adam";
+    readonly step: number;
+    readonly firstMoment: number[];
+    readonly secondMoment: number[];
+  };
   readonly tokenizer?: BytePairTokenizerData;
 }
 
 export type TransformerOptimizer = "sgd" | "adam";
+export type TransformerGradientBackend = "scalar" | "tape";
 
 export interface TransformerMetrics {
   readonly loss: number;
@@ -66,7 +74,7 @@ export class TransformerModel {
 
   public constructor(config: TransformerConfig = DEFAULT_TRANSFORMER_CONFIG, checkpoint?: Partial<TransformerCheckpoint>) {
     checkInteger(config.vocabSize, "vocabSize", 2, 512);
-    checkInteger(config.contextSize, "contextSize", 1, 32);
+    checkInteger(config.contextSize, "contextSize", 1, 128);
     checkInteger(config.embeddingSize, "embeddingSize", 4, 32);
     checkInteger(config.headCount, "headCount", 1, 8);
     if (config.embeddingSize % config.headCount !== 0) {
@@ -114,6 +122,19 @@ export class TransformerModel {
     }
     this.adamFirstMoment = new Float64Array(this.weights.length);
     this.adamSecondMoment = new Float64Array(this.weights.length);
+    const optimizerState = checkpoint?.optimizerState;
+    if (optimizerState !== undefined) {
+      if (optimizerState.kind !== "adam" || !Number.isSafeInteger(optimizerState.step) || optimizerState.step < 0
+        || optimizerState.firstMoment.length !== this.weights.length
+        || optimizerState.secondMoment.length !== this.weights.length
+        || optimizerState.firstMoment.some((x) => !Number.isFinite(x))
+        || optimizerState.secondMoment.some((x) => !Number.isFinite(x) || x < 0)) {
+        throw new Error("Checkpoint Adam optimizer state is invalid.");
+      }
+      this.adamStep = optimizerState.step;
+      this.adamFirstMoment.set(optimizerState.firstMoment);
+      this.adamSecondMoment.set(optimizerState.secondMoment);
+    }
   }
 
   private vector(name: string): Float64Array {
@@ -238,7 +259,7 @@ export class TransformerModel {
    * single optimizer update. This reference implementation prioritizes correctness
    * and gradient inspectability over training throughput.
    */
-  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void, targetStride = 1): TransformerMetrics {
+  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void, targetStride = 1, targetStartIndex = 1, gradientBackend: TransformerGradientBackend = "scalar"): TransformerMetrics {
     this.validateTokens(tokens);
     checkInteger(epochs, "epochs", 1, 1000);
     if (tokens.length < 2) throw new Error("At least two tokens are required.");
@@ -249,9 +270,11 @@ export class TransformerModel {
       throw new RangeError("maxGradientNorm must be finite and positive.");
     }
     if (optimizer !== "sgd" && optimizer !== "adam") throw new RangeError("optimizer must be sgd or adam.");
+    if (gradientBackend !== "scalar" && gradientBackend !== "tape") throw new RangeError("gradientBackend must be scalar or tape.");
     checkInteger(targetStride, "targetStride", 1, 32);
+    checkInteger(targetStartIndex, "targetStartIndex", 1, tokens.length - 1);
     const targetIndices: number[] = [];
-    for (let i = 1; i < tokens.length; i += targetStride) targetIndices.push(i);
+    for (let i = targetStartIndex; i < tokens.length; i += targetStride) targetIndices.push(i);
     if (targetIndices.at(-1) !== tokens.length - 1) targetIndices.push(tokens.length - 1);
     const exampleCount = targetIndices.length;
     let gradientNorm = 0;
@@ -264,7 +287,9 @@ export class TransformerModel {
       for (let targetIndex = 0; targetIndex < targetIndices.length; targetIndex++) {
         const i = targetIndices[targetIndex]!;
         const context = tokens.slice(Math.max(0, i - this.config.contextSize), i);
-        const result = transformerLossAndGradients(this.config, this.weights, context, tokens[i]!);
+        const result = gradientBackend === "tape"
+          ? transformerTapeLossAndGradients(this.config, this.weights, context, tokens[i]!)
+          : transformerLossAndGradients(this.config, this.weights, context, tokens[i]!);
         loss += result.loss;
         for (let p = 0; p < gradient.length; p++) {
           gradient[p] = gradient[p]! + result.gradients[p]!;
@@ -350,7 +375,18 @@ export class TransformerModel {
   }
 
   public toCheckpoint(): TransformerCheckpoint {
-    return { format: "nexus-transformer", version: 1, config: { ...this.config }, weights: Array.from(this.weights) };
+    return {
+      format: "nexus-transformer",
+      version: 1,
+      config: { ...this.config },
+      weights: Array.from(this.weights),
+      optimizerState: {
+        kind: "adam",
+        step: this.adamStep,
+        firstMoment: Array.from(this.adamFirstMoment),
+        secondMoment: Array.from(this.adamSecondMoment),
+      },
+    };
   }
 
   public static fromCheckpoint(checkpoint: TransformerCheckpoint): TransformerModel {

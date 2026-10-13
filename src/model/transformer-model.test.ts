@@ -124,3 +124,48 @@ test("Transformer supports deterministic strided target sampling and reports sam
   assert.deepEqual(progress.at(-1), { epoch: 1, epochs: 1, targetsProcessed: 5, totalTargets: 5 });
   assert.throws(() => new TransformerModel(tinyConfig).train(tokens, 0.001, 1, 1, "adam", undefined, 0), /targetStride/);
 });
+
+
+test("Transformer checkpoint preserves Adam moments and supports exact continued training", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 101 };
+  const tokens = [1, 2, 1, 3, 1, 2, 1, 3];
+  const uninterrupted = new TransformerModel(tinyConfig);
+  uninterrupted.train(tokens, 0.001, 2, 1, "adam");
+  const resumed = TransformerModel.fromCheckpoint(uninterrupted.toCheckpoint());
+  uninterrupted.train(tokens, 0.001, 1, 1, "adam");
+  resumed.train(tokens, 0.001, 1, 1, "adam");
+  assert.deepEqual(resumed.toCheckpoint().weights, uninterrupted.toCheckpoint().weights);
+  assert.deepEqual(resumed.toCheckpoint().optimizerState, uninterrupted.toCheckpoint().optimizerState);
+});
+
+test("Transformer rejects malformed persisted Adam state", () => {
+  const checkpoint = new TransformerModel(config).toCheckpoint();
+  assert.throws(() => TransformerModel.fromCheckpoint({
+    ...checkpoint,
+    optimizerState: { kind: "adam", step: -1, firstMoment: [], secondMoment: [] },
+  }), /Adam optimizer state/i);
+});
+
+
+test("Transformer can train only targets after a context-only window prefix", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 3, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 107 };
+  const model = new TransformerModel(tinyConfig);
+  const tokens = [1, 2, 3, 4, 5, 6, 7];
+  const metrics = model.train(tokens, 0.001, 1, 1, "adam", undefined, 1, 3);
+  assert.equal(metrics.examples, 4);
+  assert.ok(Number.isFinite(metrics.loss));
+});
+
+
+test("typed-array Transformer training backend matches scalar updates on a tiny task", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 109 };
+  const tokens = [1, 2, 1, 3, 1, 2];
+  const scalar = new TransformerModel(tinyConfig);
+  const tape = new TransformerModel(tinyConfig);
+  scalar.train(tokens, 0.0001, 1, 1, "adam", undefined, 1, 1, "scalar");
+  tape.train(tokens, 0.0001, 1, 1, "adam", undefined, 1, 1, "tape");
+  const a = scalar.toCheckpoint().weights;
+  const b = tape.toCheckpoint().weights;
+  assert.equal(a.length, b.length);
+  for (let i = 0; i < a.length; i++) assert.ok(Math.abs(a[i]! - b[i]!) < 1e-8, `weight ${i} diverged`);
+});
