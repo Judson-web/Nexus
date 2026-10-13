@@ -106,8 +106,8 @@ function parseMessages(text: string): Message[] {
     if (typeof message.message_id !== "string" || typeof message.text !== "string" ||
         typeof message.role !== "string" || typeof message.lang !== "string" ||
         typeof message.message_tree_id !== "string" ||
-        !(message.parent_id === null || typeof message.parent_id === "string")) {
-      throw new Error(`Unexpected OASST1 message schema at line ${index + 1}.`);
+        !(message.parent_id === undefined || message.parent_id === null || typeof message.parent_id === "string")) {
+      throw new Error(`Unexpected OASST1 message schema at line ${index + 1}; fields=${Object.keys(message).join(",")}; parent_id_type=${typeof message.parent_id}; tree_id_type=${typeof message.message_tree_id}.`);
     }
     messages.push(message as Message);
   }
