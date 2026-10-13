@@ -17,7 +17,7 @@ export function transformerLossAndGradients(
   const { vocabSize: v, contextSize: c, embeddingSize: e, headCount } = config;
   const f = config.feedForwardSize;
   const layerCount = config.layerCount ?? 1;
-  const perLayer = 4 * e * e + 5 * e + 2 * e * f + f;
+  const perLayer = 4 * e * e + 5 * e + 3 * e * f + 2 * f;
   const expectedLength = v * e + c * e + layerCount * perLayer + e * v + v;
   if (weights.length !== expectedLength) throw new RangeError("Transformer weight vector length mismatch.");
   if (!Number.isSafeInteger(target) || target < 0 || target >= v) throw new RangeError("Target token is out of range.");
@@ -35,7 +35,7 @@ export function transformerLossAndGradients(
   interface LayerParameters {
     q: Value[]; k: Value[]; value: Value[]; attentionOut: Value[];
     attentionScale: Value[]; attentionBias: Value[];
-    ff1: Value[]; ff1Bias: Value[]; ff2: Value[]; ff2Bias: Value[];
+    ff1: Value[]; ff1Bias: Value[]; ffGate: Value[]; ffGateBias: Value[]; ff2: Value[]; ff2Bias: Value[];
     ffScale: Value[]; ffBias: Value[];
   }
   const layers: LayerParameters[] = [];
@@ -43,7 +43,7 @@ export function transformerLossAndGradients(
     layers.push({
       q: take(e * e), k: take(e * e), value: take(e * e), attentionOut: take(e * e),
       attentionScale: take(e), attentionBias: take(e),
-      ff1: take(e * f), ff1Bias: take(f), ff2: take(f * e), ff2Bias: take(e),
+      ff1: take(e * f), ff1Bias: take(f), ffGate: take(e * f), ffGateBias: take(f), ff2: take(f * e), ff2Bias: take(e),
       ffScale: take(e), ffBias: take(e),
     });
   }
@@ -60,12 +60,10 @@ export function transformerLossAndGradients(
     return out;
   };
   const normalize = (input: readonly Value[], scale: readonly Value[], bias: readonly Value[]): Value[] => {
-    let mean = zero();
-    for (const x of input) mean = mean.add(x.div(input.length));
-    let variance = zero();
-    for (const x of input) variance = variance.add(x.sub(mean).pow(2).div(input.length));
-    const inverse = variance.add(1e-5).pow(-0.5);
-    return input.map((x, i) => x.sub(mean).mul(inverse).mul(scale[i]!).add(bias[i]!));
+    let meanSquare = zero();
+    for (const x of input) meanSquare = meanSquare.add(x.pow(2).div(input.length));
+    const inverse = meanSquare.add(1e-5).pow(-0.5);
+    return input.map((x, i) => x.mul(inverse).mul(scale[i]!).add(bias[i]!));
   };
   const tail = context.slice(-c);
   const padded = [...new Array<number>(c - tail.length).fill(0), ...tail];
@@ -104,10 +102,13 @@ export function transformerLossAndGradients(
       const projected = dotProjection(attended, layer.attentionOut, e);
       let state = normalize(states[p]!.map((x, i) => x.add(projected[i]!)), layer.attentionScale, layer.attentionBias);
       const hidden = Array.from({ length: f }, (_, j) => {
-        let z = layer.ff1Bias[j]!;
-        for (let i = 0; i < e; i++) z = z.add(state[i]!.mul(layer.ff1[i * f + j]!));
-        const inner = z.add(z.pow(3).mul(0.044715)).mul(Math.sqrt(2 / Math.PI));
-        return z.mul(0.5).mul(inner.tanh().add(1));
+        let value = layer.ff1Bias[j]!;
+        let gate = layer.ffGateBias[j]!;
+        for (let i = 0; i < e; i++) {
+          value = value.add(state[i]!.mul(layer.ff1[i * f + j]!));
+          gate = gate.add(state[i]!.mul(layer.ffGate[i * f + j]!));
+        }
+        return value.mul(gate.div(gate.mul(-1).exp().add(1)));
       });
       const ffOutput = dotProjection(hidden, layer.ff2, e).map((x, i) => x.add(layer.ff2Bias[i]!));
       state = normalize(state.map((x, i) => x.add(ffOutput[i]!)), layer.ffScale, layer.ffBias);
