@@ -145,3 +145,13 @@ test("Transformer rejects malformed persisted Adam state", () => {
     optimizerState: { kind: "adam", step: -1, firstMoment: [], secondMoment: [] },
   }), /Adam optimizer state/i);
 });
+
+
+test("Transformer can train only targets after a context-only window prefix", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 3, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 107 };
+  const model = new TransformerModel(tinyConfig);
+  const tokens = [1, 2, 3, 4, 5, 6, 7];
+  const metrics = model.train(tokens, 0.001, 1, 1, "adam", undefined, 1, 3);
+  assert.equal(metrics.examples, 4);
+  assert.ok(Number.isFinite(metrics.loss));
+});
