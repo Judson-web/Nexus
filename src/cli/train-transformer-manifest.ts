@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { validateDatasetManifest } from "../evaluation/manifest.js";
 import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel } from "../model/transformer-model.js";
+import type { TransformerCheckpoint } from "../model/transformer-model.js";
 import { EOS_TOKEN_ID } from "../tokenizer/byte-tokenizer.js";
 import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
 import { makeOverlappingTokenWindows } from "../training/token-windows.js";
@@ -16,7 +17,7 @@ function parseArgs(args: string[]): Map<string, string> {
     const value = args[i + 1];
     if (!value || value.startsWith("--")) throw new Error(`Missing value for ${key}`);
     if (options.has(name)) throw new Error(`Duplicate option: ${key}`);
-    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
+    if (!["manifest", "output", "initial-checkpoint", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
       throw new Error(`Unknown option: ${key}`);
     }
     options.set(name, value);
@@ -104,10 +105,30 @@ async function main(): Promise<void> {
     feedForwardSize: numeric(options, "feed-forward-size", 8),
     seed,
   };
+  // A resumed run must reuse the checkpoint tokenizer; never silently remap token IDs.
+  const initialCheckpointPath = options.get("initial-checkpoint");
+  let initialCheckpoint: TransformerCheckpoint | undefined;
+  if (initialCheckpointPath) {
+    initialCheckpoint = JSON.parse(await readFile(initialCheckpointPath, "utf8")) as TransformerCheckpoint;
+    if (!initialCheckpoint.tokenizer) throw new Error("Initial checkpoint has no embedded tokenizer; refusing unsafe resume.");
+  }
   // Learn merges from training text only; held-out text never influences token IDs.
-  const tokenizer = BytePairTokenizer.train(trainingExamples.map((example) => example.text), 255);
+  const tokenizer = initialCheckpoint?.tokenizer
+    ? new BytePairTokenizer(initialCheckpoint.tokenizer)
+    : BytePairTokenizer.train(trainingExamples.map((example) => example.text), 255);
   const modelConfig = { ...config, vocabSize: tokenizer.vocabSize };
-  const model = new TransformerModel(modelConfig);
+  if (initialCheckpoint && (
+    initialCheckpoint.config.vocabSize !== modelConfig.vocabSize
+    || initialCheckpoint.config.contextSize !== modelConfig.contextSize
+    || initialCheckpoint.config.embeddingSize !== modelConfig.embeddingSize
+    || initialCheckpoint.config.headCount !== modelConfig.headCount
+    || initialCheckpoint.config.feedForwardSize !== modelConfig.feedForwardSize
+  )) {
+    throw new Error("Initial checkpoint architecture differs from requested config; use matching dimensions when resuming.");
+  }
+  const model = initialCheckpoint
+    ? TransformerModel.fromCheckpoint(initialCheckpoint)
+    : new TransformerModel(modelConfig);
   let weightedLoss = 0;
   let trainedTokens = 0;
   let truncatedExamples = 0;
@@ -171,6 +192,7 @@ async function main(): Promise<void> {
     },
     training: {
       seed, epochsPerExample: epochs, learningRate, optimizer,
+      resumedFromCheckpoint: initialCheckpointPath ?? null,
       tokenizer: { type: "train-only byte-pair", merges: tokenizer.toJSON().merges.length, vocabSize: tokenizer.vocabSize },
       trainedExamples: trainingExamples.length,
       maxTokensPerExample,
