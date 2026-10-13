@@ -4,6 +4,10 @@ Nexus is a TypeScript-first research project for building and progressively trai
 
 ## Current milestone
 
+The current scale-up experiment is isolated on `training/2026-10-13-scale-up`; it expands the CC0 corpus target to 500 documents, doubles epochs, increases Transformer dimensions, and aligns tokenizer truncation diagnostics with the configured 384-token cap. It does not change the production checkpoint.
+
+
+
 The repository includes two in-repository CPU language-model baselines: a byte-level bigram model and a context-window neural MLP with learned byte embeddings, a tanh hidden layer, and a softmax next-byte head. The web endpoint serves only a configured, checksum-verified Transformer checkpoint. If no checkpoint is configured, inference returns an explicit `503 MODEL_NOT_CONFIGURED` response rather than generating misleading output from the tiny bigram baseline.
 
 - Deterministic model initialization, UTF-8 byte tokenizer, and CPU training.
