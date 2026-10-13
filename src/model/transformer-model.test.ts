@@ -166,3 +166,21 @@ test("Transformer supports independently parameterized decoder depth", () => {
   assert.ok(after.some((weight, index) => weight !== before[index]));
   assert.deepEqual(TransformerModel.fromCheckpoint(deep.toCheckpoint()).probabilities([1, 2]), deep.probabilities([1, 2]));
 });
+
+test("Legacy single-block checkpoints remain inference-compatible", () => {
+  const legacyConfig = { vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 97 };
+  const oldWeightCount = legacyConfig.vocabSize * legacyConfig.embeddingSize +
+    legacyConfig.contextSize * legacyConfig.embeddingSize +
+    4 * legacyConfig.embeddingSize ** 2 + 5 * legacyConfig.embeddingSize +
+    2 * legacyConfig.embeddingSize * legacyConfig.feedForwardSize +
+    legacyConfig.feedForwardSize + legacyConfig.vocabSize * legacyConfig.embeddingSize + legacyConfig.vocabSize;
+  const legacy = TransformerModel.fromCheckpoint({
+    format: "nexus-transformer", version: 1, config: legacyConfig, weights: new Array(oldWeightCount).fill(0),
+  });
+  const probabilities = legacy.probabilities([1, 2]);
+  assert.equal(probabilities.length, legacyConfig.vocabSize);
+  assert.ok(Math.abs(probabilities.reduce((sum, value) => sum + value, 0) - 1) < 1e-9);
+  assert.throws(() => legacy.train([1, 2, 3]), /inference-only/i);
+  const roundTrip = TransformerModel.fromCheckpoint(legacy.toCheckpoint());
+  assert.deepEqual(roundTrip.probabilities([1, 2]), probabilities);
+});
