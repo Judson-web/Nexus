@@ -10,7 +10,7 @@ interface Candidate {
   readonly heads: number;
   readonly feedForwardSize: number;
   readonly learningRate: number;
-  readonly optimizer: "adam" | "sgd";
+  readonly optimizer: "adamw" | "adam" | "sgd";
 }
 interface RunResult {
   readonly candidate: Candidate;
@@ -25,7 +25,7 @@ interface RunResult {
 
 function parseArgs(args: string[]): Map<string, string> {
   const options = new Map<string, string>();
-  const allowed = new Set(["manifest", "output-dir", "summary", "epochs", "workers", "seed", "max-minutes", "max-tokens-per-example", "target-stride"]);
+  const allowed = new Set(["manifest", "output-dir", "summary", "epochs", "workers", "seed", "max-minutes", "max-tokens-per-example", "target-stride", "weight-decay", "schedule"]);
   for (let i = 0; i < args.length; i += 1) {
     const key = args[i]!;
     if (!key.startsWith("--")) throw new Error(`Unexpected argument: ${key}`);
@@ -59,6 +59,8 @@ function runCandidate(candidate: Candidate, options: Map<string, string>, manife
       "--feed-forward-size", String(candidate.feedForwardSize),
       "--learning-rate", String(candidate.learningRate),
       "--optimizer", candidate.optimizer,
+      "--schedule", options.get("schedule") ?? "cosine",
+      "--weight-decay", options.get("weight-decay") ?? (candidate.optimizer === "adamw" ? "0.01" : "0"),
       "--max-minutes", options.get("max-minutes") ?? "30",
       "--max-tokens-per-example", options.get("max-tokens-per-example") ?? "192",
       "--target-stride", options.get("target-stride") ?? "2",
@@ -113,8 +115,8 @@ async function main(): Promise<void> {
   // Small, deliberately diverse candidates. Increase model sizes only after the
   // local CPU profiler confirms that the available memory/compute can sustain it.
   const candidates: Candidate[] = [
-    { name: "adam-context8", seed, contextSize: 8, embeddingSize: 8, heads: 2, feedForwardSize: 16, learningRate: 0.0003, optimizer: "adam" },
-    { name: "adam-context16", seed: seed + 1, contextSize: 16, embeddingSize: 8, heads: 2, feedForwardSize: 16, learningRate: 0.0003, optimizer: "adam" },
+    { name: "adam-context8", seed, contextSize: 8, embeddingSize: 8, heads: 2, feedForwardSize: 16, learningRate: 0.0003, optimizer: "adamw" },
+    { name: "adam-context16", seed: seed + 1, contextSize: 16, embeddingSize: 8, heads: 2, feedForwardSize: 16, learningRate: 0.0003, optimizer: "adamw" },
     { name: "adam-wider", seed: seed + 2, contextSize: 12, embeddingSize: 12, heads: 3, feedForwardSize: 24, learningRate: 0.0002, optimizer: "adam" },
     { name: "sgd-control", seed: seed + 3, contextSize: 8, embeddingSize: 8, heads: 2, feedForwardSize: 16, learningRate: 0.0001, optimizer: "sgd" },
   ];
