@@ -41,7 +41,7 @@ jobs:
       - name: Audit corpus and tokenizer coverage
         run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/public-domain-manifest.json > artifacts/tokenizer-audit.json
       - name: Train the model on the full-text corpus
-        run: npm run train:transformer:manifest -- --manifest artifacts/public-domain-manifest.json --output artifacts/nexus-public-domain-candidate.json --epochs "${{ inputs.epochs || '1' }}" --seed 17 --optimizer adam --context-size 32 --embedding-size 16 --heads 4 --feed-forward-size 64 --learning-rate 0.0003 --max-minutes 300 --max-tokens-per-example 512 --target-stride 3
+        run: npm run train:transformer:manifest -- --manifest artifacts/public-domain-manifest.json --output artifacts/nexus-public-domain-candidate.json --epochs "${{ inputs.epochs || '1' }}" --seed 17 --optimizer adam --context-size 64 --embedding-size 16 --heads 4 --feed-forward-size 64 --learning-rate 0.0003 --max-minutes 300 --max-tokens-per-example 512 --target-stride 2
       - name: Verify provenance and held-out metrics
         run: |
           node --input-type=module -e '
