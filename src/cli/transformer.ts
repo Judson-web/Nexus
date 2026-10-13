@@ -46,6 +46,7 @@ async function main(): Promise<void> {
       embeddingSize: numeric(options, "embedding-size", DEFAULT_TRANSFORMER_CONFIG.embeddingSize),
       headCount: numeric(options, "heads", DEFAULT_TRANSFORMER_CONFIG.headCount),
       feedForwardSize: numeric(options, "feed-forward-size", DEFAULT_TRANSFORMER_CONFIG.feedForwardSize),
+      layerCount: numeric(options, "layer-count", DEFAULT_TRANSFORMER_CONFIG.layerCount ?? 2),
       seed: numeric(options, "seed", DEFAULT_TRANSFORMER_CONFIG.seed),
     };
     const model = new TransformerModel(config);
