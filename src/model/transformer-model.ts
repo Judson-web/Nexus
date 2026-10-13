@@ -66,7 +66,7 @@ export class TransformerModel {
 
   public constructor(config: TransformerConfig = DEFAULT_TRANSFORMER_CONFIG, checkpoint?: Partial<TransformerCheckpoint>) {
     checkInteger(config.vocabSize, "vocabSize", 2, 512);
-    checkInteger(config.contextSize, "contextSize", 1, 32);
+    checkInteger(config.contextSize, "contextSize", 1, 128);
     checkInteger(config.embeddingSize, "embeddingSize", 4, 32);
     checkInteger(config.headCount, "headCount", 1, 8);
     if (config.embeddingSize % config.headCount !== 0) {
