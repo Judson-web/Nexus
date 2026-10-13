@@ -44,6 +44,10 @@ jobs:
           npm run evaluate:manifest -- --manifest /tmp/nexus-data/manifest.json --epochs 1 --seed 17
           npm run train:transformer:manifest -- --manifest /tmp/nexus-data/manifest.json --output /tmp/nexus-data/transformer.json --epochs 1 --context-size 2 --embedding-size 4 --heads 2 --feed-forward-size 4 --learning-rate 0.0001
           node -e "const fs=require('node:fs'); const p=JSON.parse(fs.readFileSync('/tmp/nexus-data/transformer.json.provenance.json','utf8')); if(p.dataset.validationAndTestUsedForTraining!==false || !p.checkpoint.sha256 || p.training.trainedExamples!==p.dataset.splitCounts.train || p.heldOutEvaluation.testUsedForModelSelection!==false || !Number.isFinite(p.heldOutEvaluation.validation.negativeLogLikelihood) || !Number.isFinite(p.heldOutEvaluation.test.perplexity)) process.exit(1)"
+      - name: Verify concurrent validation-ranked training sweep
+        run: |
+          npm run train:sweep -- --manifest /tmp/nexus-data/manifest.json --output-dir /tmp/nexus-data/sweep --summary /tmp/nexus-data/sweep-summary.json --workers 2 --epochs 1 --max-minutes 2 --max-tokens-per-example 16 --target-stride 8
+          node -e "const fs=require('node:fs'); const s=JSON.parse(fs.readFileSync('/tmp/nexus-data/sweep-summary.json','utf8')); if(s.runs.length!==4 || s.testUsedForSelection!==false || !s.winner || s.runs.some(r=>r.exitCode!==0 || !Number.isFinite(r.validationNll))) process.exit(1)"
       - name: Verify source-provided split preparation and leakage guard
         run: |
           mkdir -p /tmp/nexus-source-splits
