@@ -150,7 +150,11 @@ async function main(): Promise<void> {
     options.set(key.slice(2), args[i + 1]!);
     i += 1;
   }
-  for (const key of options.keys()) if (key !== "output") throw new Error(`Unknown option --${key}`);
+  for (const key of options.keys()) if (key !== "output" && key !== "max-trees") throw new Error(`Unknown option --${key}`);
+  const maxTrees = Number(options.get("max-trees") ?? "500");
+  if (!Number.isSafeInteger(maxTrees) || maxTrees < 100 || maxTrees > 10000) {
+    throw new RangeError("--max-trees must be an integer between 100 and 10000");
+  }
   const output = options.get("output") ?? "artifacts/oasst1";
   await verifyRevision();
   const [compressed, licenseBytes] = await Promise.all([
@@ -158,9 +162,13 @@ async function main(): Promise<void> {
     downloadPinnedFile("LICENSE"),
   ]);
   const uncompressed = gunzipSync(compressed);
-  const messages = parseMessages(uncompressed.toString("utf8"));
+  const allMessages = parseMessages(uncompressed.toString("utf8"));
   await verifyRevision();
-
+  const treeIds = [...new Set(allMessages.map((message) => message.message_tree_id))]
+    .sort((left, right) => sha256("sample:" + left).localeCompare(sha256("sample:" + right)))
+    .slice(0, maxTrees);
+  const selectedTreeIds = new Set(treeIds);
+  const messages = allMessages.filter((message) => selectedTreeIds.has(message.message_tree_id));
   const pairs = makePairs(messages);
   const splitTexts = {
     train: pairs.filter((pair) => pair.split === "train").map((pair) => pair.text),
@@ -182,10 +190,13 @@ async function main(): Promise<void> {
     retrievedAt: new Date().toISOString(),
     sourceFileSha256: sha256(compressed),
     uncompressedFileSha256: sha256(uncompressed),
-    sourceMessages: messages.length,
+    sourceMessages: allMessages.length,
+    selectedTrees: treeIds.length,
+    selectedMessages: messages.length,
+    maxTrees,
     acceptedEnglishPairs: pairs.length,
     examples: Object.fromEntries(Object.entries(splitTexts).map(([split, examples]) => [split, examples.length])),
-    splitPolicy: "Deterministic SHA-256 split by message_tree_id (90% train, 5% validation, 5% test); complete conversation trees stay within one split.",
+    splitPolicy: "Deterministic SHA-256 ranked subset of maxTrees, then tree-id hash split (90% train, 5% validation, 5% test); complete conversation trees stay within one split.",
     filters: [
       "English user/assistant parent-child pairs only",
       "deleted messages and negative review results excluded",
@@ -218,7 +229,9 @@ async function main(): Promise<void> {
     dataset: DATASET,
     revision: REVISION,
     license: LICENSE,
-    sourceMessages: messages.length,
+    sourceMessages: allMessages.length,
+    selectedTrees: treeIds.length,
+    selectedMessages: messages.length,
     acceptedEnglishPairs: pairs.length,
     splits: manifest.examples,
     sourceFileSha256: manifest.sourceFileSha256,
