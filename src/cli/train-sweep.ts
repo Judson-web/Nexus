@@ -83,14 +83,14 @@ function runCandidate(candidate: Candidate, options: Map<string, string>, manife
         };
         const validation = provenance.heldOutEvaluation?.validation;
         const test = provenance.heldOutEvaluation?.test;
-        if (!validation || !Number.isFinite(validation.negativeLogLikelihood) || !Number.isFinite(validation.perplexity)) {
+        if (!validation || typeof validation.negativeLogLikelihood !== "number" || !Number.isFinite(validation.negativeLogLikelihood) || typeof validation.perplexity !== "number" || !Number.isFinite(validation.perplexity)) {
           return resolveResult({ ...base, exitCode: 2, error: "Run completed but validation metrics were missing or invalid." });
         }
         resolveResult({
           ...base,
           validationNll: validation.negativeLogLikelihood,
           validationPerplexity: validation.perplexity,
-          ...(Number.isFinite(test?.negativeLogLikelihood) ? { testNll: test!.negativeLogLikelihood } : {}),
+          ...(typeof test?.negativeLogLikelihood === "number" && Number.isFinite(test.negativeLogLikelihood) ? { testNll: test.negativeLogLikelihood } : {}),
         });
       } catch (error) {
         resolveResult({ ...base, exitCode: 2, error: `Could not read provenance: ${error instanceof Error ? error.message : String(error)}` });
