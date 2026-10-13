@@ -72,7 +72,7 @@ test("typed-array Transformer gradients match finite differences", () => {
 });
 
 test("typed-array Transformer gradient path rejects malformed inputs", () => {
-  const config = { ...DEFAULT_TRANSFORMER_CONFIG, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4 };
+  const config = { ...DEFAULT_TRANSFORMER_CONFIG, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, layerCount: 1 };
   const model = new TransformerModel(config);
   const weights = Float64Array.from(model.toCheckpoint().weights);
   assert.throws(() => transformerTapeLossAndGradients(config, weights.slice(1), [1], 2), /weight vector length/i);
