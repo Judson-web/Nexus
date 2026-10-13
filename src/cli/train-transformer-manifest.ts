@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { validateDatasetManifest } from "../evaluation/manifest.js";
-import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel, type LearningRateSchedule, type TransformerOptimizer } from "../model/transformer-model.js";
+import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel, type LearningRateSchedule, type TransformerOptimizer, type TransformerCheckpoint } from "../model/transformer-model.js";
 import { EOS_TOKEN_ID } from "../tokenizer/byte-tokenizer.js";
 import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
 
@@ -15,7 +15,7 @@ function parseArgs(args: string[]): Map<string, string> {
     const value = args[i + 1];
     if (!value || value.startsWith("--")) throw new Error(`Missing value for ${key}`);
     if (options.has(name)) throw new Error(`Duplicate option: ${key}`);
-    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "schedule", "weight-decay", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
+    if (!["manifest", "output", "resume-from", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "schedule", "weight-decay", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
       throw new Error(`Unknown option: ${key}`);
     }
     options.set(name, value);
@@ -96,6 +96,7 @@ async function main(): Promise<void> {
   if (learningRate <= 0 || learningRate > 0.02) throw new RangeError("learning-rate must be in (0, 0.02].");
 
   const rawManifest = await readFile(manifestPath, "utf8");
+  const manifestSha256 = createHash("sha256").update(rawManifest, "utf8").digest("hex");
   const manifest = validateDatasetManifest(JSON.parse(rawManifest) as unknown);
   const trainingExamples = manifest.examples.filter((example) => example.split === "train");
   if (trainingExamples.length === 0) throw new Error("Dataset manifest has no training examples.");
@@ -108,10 +109,44 @@ async function main(): Promise<void> {
     feedForwardSize: numeric(options, "feed-forward-size", 8),
     seed,
   };
-  // Learn merges from training text only; held-out text never influences token IDs.
-  const tokenizer = BytePairTokenizer.train(trainingExamples.map((example) => example.text), 255);
-  const modelConfig = { ...config, vocabSize: tokenizer.vocabSize };
-  const model = new TransformerModel(modelConfig);
+  // A resume checkpoint pins both the tokenizer and exact dataset/training configuration.
+  // Fresh runs learn merges from training text only; held-out text never influences token IDs.
+  const resumeFrom = options.get("resume-from");
+  let tokenizer: BytePairTokenizer;
+  let modelConfig: typeof config & { vocabSize: number };
+  let model: TransformerModel;
+  const completedExampleIds = new Set<string>();
+  const resumePath = resumeFrom ? `${resumeFrom}.resume.json` : `${outputPath}.resume.json`;
+  if (resumeFrom) {
+    const rawCheckpoint = JSON.parse(await readFile(resumeFrom, "utf8")) as TransformerCheckpoint & { tokenizer?: import("../tokenizer/byte-pair-tokenizer.js").BytePairTokenizerData };
+    if (!rawCheckpoint.tokenizer) throw new Error("Resume checkpoint has no tokenizer data.");
+    tokenizer = new BytePairTokenizer(rawCheckpoint.tokenizer);
+    modelConfig = { ...config, vocabSize: tokenizer.vocabSize };
+    if (JSON.stringify(rawCheckpoint.config) !== JSON.stringify(modelConfig)) throw new Error("Resume checkpoint model configuration does not match the requested configuration.");
+    const resumeState = JSON.parse(await readFile(resumePath, "utf8")) as {
+      format: string; manifestSha256: string; completedExampleIds: string[]; modelConfig: typeof modelConfig;
+      epochs: number; learningRate: number; optimizer: TransformerOptimizer; schedule: LearningRateSchedule; weightDecay: number; targetStride: number; maxTokensPerExample: number;
+    };
+    if (resumeState.format !== "nexus-training-resume" || resumeState.manifestSha256 !== manifestSha256) throw new Error("Resume checkpoint manifest hash mismatch.");
+    if (JSON.stringify(resumeState.modelConfig) !== JSON.stringify(modelConfig) ||
+        resumeState.epochs !== epochs || resumeState.learningRate !== learningRate ||
+        resumeState.optimizer !== optimizer || resumeState.schedule !== schedule ||
+        resumeState.weightDecay !== weightDecay || resumeState.targetStride !== targetStride ||
+        resumeState.maxTokensPerExample !== maxTokensPerExample) {
+      throw new Error("Resume settings differ from the saved run. Use the same model and training options.");
+    }
+    if (!Array.isArray(resumeState.completedExampleIds) || resumeState.completedExampleIds.some((id) => typeof id !== "string")) throw new Error("Resume progress metadata is malformed.");
+    for (const id of resumeState.completedExampleIds) completedExampleIds.add(id);
+    model = TransformerModel.fromCheckpoint(rawCheckpoint);
+    if (completedExampleIds.size > trainingExamples.length || [...completedExampleIds].some((id) => !trainingExamples.some((example) => example.id === id))) {
+      throw new Error("Resume progress contains unknown training example IDs.");
+    }
+    console.error(`[resume] restored ${completedExampleIds.size}/${trainingExamples.length} completed examples and optimizer state`);
+  } else {
+    tokenizer = BytePairTokenizer.train(trainingExamples.map((example) => example.text), 255);
+    modelConfig = { ...config, vocabSize: tokenizer.vocabSize };
+    model = new TransformerModel(modelConfig);
+  }
   let weightedLoss = 0;
   let trainedTokens = 0;
   let truncatedExamples = 0;
@@ -124,6 +159,7 @@ async function main(): Promise<void> {
   const startedAt = Date.now();
   for (const example of trainingExamples) {
     exampleIndex += 1;
+    if (completedExampleIds.has(example.id)) continue;
     if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit before example ${exampleIndex}/${trainingExamples.length}.`);
     let tokens = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
     if (tokens.length > maxTokensPerExample) {
@@ -142,8 +178,18 @@ async function main(): Promise<void> {
     trainedTokens += metrics.examples;
     lastGradientNorm = metrics.gradientNorm;
     lastGradientScale = metrics.gradientScale;
+    completedExampleIds.add(example.id);
+    const resumableCheckpoint = JSON.stringify({ ...model.toCheckpoint(), tokenizer: tokenizer.toJSON() }, null, 2) + "\n";
+    const resumableBytes = Buffer.from(resumableCheckpoint, "utf8");
+    const resumableSha256 = createHash("sha256").update(resumableBytes).digest("hex");
+    await writeAtomic(outputPath, resumableCheckpoint);
+    await writeAtomic(`${outputPath}.sha256`, `${resumableSha256}  ${resumableBytes.length}\n`);
+    await writeAtomic(`${outputPath}.resume.json`, JSON.stringify({
+      format: "nexus-training-resume", manifestSha256, completedExampleIds: [...completedExampleIds],
+      modelConfig, epochs, learningRate, optimizer, schedule, weightDecay, targetStride, maxTokensPerExample,
+    }, null, 2) + "\n");
   }
-  if (trainedTokens === 0) throw new Error("Training examples contain no usable next-token targets.");
+  if (trainedTokens === 0 && completedExampleIds.size === 0) throw new Error("Training examples contain no usable next-token targets.");
 
   const validationExamples = manifest.examples.filter((example) => example.split === "validation");
   const testExamples = manifest.examples.filter((example) => example.split === "test");
@@ -156,7 +202,6 @@ async function main(): Promise<void> {
   const checkpointContent = JSON.stringify({ ...model.toCheckpoint(), tokenizer: tokenizer.toJSON() }, null, 2) + "\n";
   const checkpointBytes = Buffer.from(checkpointContent, "utf8");
   const checkpointSha256 = createHash("sha256").update(checkpointBytes).digest("hex");
-  const manifestSha256 = createHash("sha256").update(rawManifest, "utf8").digest("hex");
   const provenance = {
     format: "nexus-transformer-provenance",
     version: 1,
@@ -189,6 +234,7 @@ async function main(): Promise<void> {
   await writeAtomic(outputPath, checkpointContent);
   await writeAtomic(`${outputPath}.sha256`, `${checkpointSha256}  ${checkpointBytes.length}\n`);
   await writeAtomic(`${outputPath}.provenance.json`, JSON.stringify(provenance, null, 2) + "\n");
+  await writeAtomic(`${outputPath}.resume.json`, JSON.stringify({ format: "nexus-training-resume", manifestSha256, completedExampleIds: [...completedExampleIds], modelConfig, epochs, learningRate, optimizer, schedule, weightDecay, targetStride, maxTokensPerExample }, null, 2) + "\n");
   console.log(JSON.stringify({ outputPath, checkpointSha256, provenancePath: `${outputPath}.provenance.json`, ...provenance.training, heldOutEvaluation }, null, 2));
 }
 
