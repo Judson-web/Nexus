@@ -14,6 +14,7 @@ export function transformerTapeLossAndGradients(
 ): TransformerGradientResult {
   const { vocabSize: v, contextSize: c, embeddingSize: e, headCount } = config;
   const f = config.feedForwardSize;
+  if ((config.layerCount ?? 1) !== 1) throw new RangeError("Typed-array tape currently supports one Transformer layer.");
   const expectedLength = v * e + c * e + 4 * e * e + 4 * e + e * f + f + f * e + e + e * v + v;
   if (weights.length !== expectedLength) throw new RangeError("Transformer weight vector length mismatch.");
   if (!Number.isSafeInteger(target) || target < 0 || target >= v) throw new RangeError("Target token is out of range.");
