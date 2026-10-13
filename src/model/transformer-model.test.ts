@@ -184,3 +184,11 @@ test("Legacy single-block checkpoints remain inference-compatible", () => {
   const roundTrip = TransformerModel.fromCheckpoint(legacy.toCheckpoint());
   assert.deepEqual(roundTrip.probabilities([1, 2]), probabilities);
 });
+
+test("Transformer accepts the expanded 256-token context limit", () => {
+  const longContext = new TransformerModel({ ...config, vocabSize: 8, contextSize: 256, layerCount: 1 });
+  const probabilities = longContext.probabilities([1, 2, 3]);
+  assert.equal(probabilities.length, 8);
+  assert.ok(Math.abs(probabilities.reduce((sum, value) => sum + value, 0) - 1) < 1e-9);
+  assert.throws(() => new TransformerModel({ ...config, contextSize: 257 }), /contextSize/i);
+});
