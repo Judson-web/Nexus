@@ -23,7 +23,6 @@ const WORKS: readonly Work[] = [
   { id: 76, title: "Adventures of Huckleberry Finn", author: "Mark Twain", year: 1884 },
   { id: 84, title: "Frankenstein", author: "Mary Shelley", year: 1818 },
   { id: 98, title: "A Tale of Two Cities", author: "Charles Dickens", year: 1859 },
-  { id: 100, title: "The Complete Works of William Shakespeare", author: "William Shakespeare", year: 1623 },
   { id: 120, title: "Robinson Crusoe", author: "Daniel Defoe", year: 1719 },
   { id: 174, title: "Little Women", author: "Louisa May Alcott", year: 1868 },
   { id: 215, title: "The Call of the Wild", author: "Jack London", year: 1903 },
