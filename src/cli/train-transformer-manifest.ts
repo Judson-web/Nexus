@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { validateDatasetManifest } from "../evaluation/manifest.js";
-import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel } from "../model/transformer-model.js";
+import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel, type LearningRateSchedule, type TransformerOptimizer } from "../model/transformer-model.js";
 import { EOS_TOKEN_ID } from "../tokenizer/byte-tokenizer.js";
 import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
 
@@ -15,7 +15,7 @@ function parseArgs(args: string[]): Map<string, string> {
     const value = args[i + 1];
     if (!value || value.startsWith("--")) throw new Error(`Missing value for ${key}`);
     if (options.has(name)) throw new Error(`Duplicate option: ${key}`);
-    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
+    if (!["manifest", "output", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "schedule", "weight-decay", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
       throw new Error(`Unknown option: ${key}`);
     }
     options.set(name, value);
@@ -84,8 +84,13 @@ async function main(): Promise<void> {
   if (!Number.isSafeInteger(maxTokensPerExample) || maxTokensPerExample < 16 || maxTokensPerExample > 4096) throw new RangeError("max-tokens-per-example must be an integer between 16 and 4096.");
   if (maxMinutes <= 0 || maxMinutes > 300) throw new RangeError("max-minutes must be in (0, 300].");
   const deadline = Date.now() + maxMinutes * 60_000;
-  const optimizer = options.get("optimizer") ?? "adam";
-  if (optimizer !== "adam" && optimizer !== "sgd") throw new RangeError("optimizer must be adam or sgd.");
+  const optimizer = (options.get("optimizer") ?? "adamw") as TransformerOptimizer;
+  if (optimizer !== "adamw" && optimizer !== "adam" && optimizer !== "sgd") throw new RangeError("optimizer must be adamw, adam, or sgd.");
+  const schedule = (options.get("schedule") ?? "cosine") as LearningRateSchedule;
+  if (schedule !== "constant" && schedule !== "cosine") throw new RangeError("schedule must be constant or cosine.");
+  const weightDecay = numeric(options, "weight-decay", optimizer === "adamw" ? 0.01 : 0);
+  if (!Number.isFinite(weightDecay) || weightDecay < 0 || weightDecay > 0.1) throw new RangeError("weight-decay must be in [0, 0.1].");
+  if (optimizer !== "adamw" && weightDecay !== 0) throw new RangeError("weight-decay is supported only with adamw.");
   if (!Number.isSafeInteger(epochs) || epochs < 1 || epochs > 1000) throw new RangeError("epochs must be an integer between 1 and 1000.");
   if (!Number.isSafeInteger(seed)) throw new RangeError("seed must be a safe integer.");
   if (learningRate <= 0 || learningRate > 0.02) throw new RangeError("learning-rate must be in (0, 0.02].");
@@ -132,7 +137,7 @@ async function main(): Promise<void> {
     const metrics = model.train(tokens, learningRate, epochs, 1, optimizer, (progress) => {
       if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit during example ${exampleIndex}/${trainingExamples.length}.`);
       console.error(`[train] example ${exampleIndex}/${trainingExamples.length} epoch ${progress.epoch}/${progress.epochs}: ${progress.targetsProcessed}/${progress.totalTargets} targets; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
-    }, targetStride);
+    }, targetStride, weightDecay, schedule);
     weightedLoss += metrics.loss * metrics.examples;
     trainedTokens += metrics.examples;
     lastGradientNorm = metrics.gradientNorm;
@@ -167,7 +172,7 @@ async function main(): Promise<void> {
       validationAndTestUsedForTraining: false,
     },
     training: {
-      seed, epochsPerExample: epochs, learningRate, optimizer,
+      seed, epochsPerExample: epochs, learningRate, optimizer, schedule, weightDecay,
       tokenizer: { type: "train-only byte-pair", merges: tokenizer.toJSON().merges.length, vocabSize: tokenizer.vocabSize },
       trainedExamples: trainingExamples.length,
       maxTokensPerExample,
