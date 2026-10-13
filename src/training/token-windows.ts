@@ -30,7 +30,7 @@ export function makeOverlappingTokenWindows(
   while (sourceStart < tokens.length - 1) {
     const sourceEnd = Math.min(tokens.length, sourceStart + maxTokensPerWindow);
     const windowTokens = tokens.slice(sourceStart, sourceEnd);
-    const targetStartIndex = sourceStart === 0 ? 1 : contextOverlap + 1;
+    const targetStartIndex = sourceStart === 0 ? 1 : contextOverlap;
     if (targetStartIndex < windowTokens.length) {
       windows.push({ tokens: windowTokens, targetStartIndex, sourceStart });
     }
