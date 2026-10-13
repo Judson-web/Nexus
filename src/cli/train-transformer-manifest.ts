@@ -146,7 +146,7 @@ async function main(): Promise<void> {
     }
     console.error(`[resume] restored ${completedExampleIds.size}/${trainingExamples.length} completed examples and optimizer state`);
   } else {
-    tokenizer = BytePairTokenizer.train(trainingExamples.map((example) => example.text), 255);
+    tokenizer = BytePairTokenizer.train(trainingExamples.map((example) => example.text), 767);
     modelConfig = { ...config, vocabSize: tokenizer.vocabSize };
     model = new TransformerModel(modelConfig);
   }
