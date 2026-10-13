@@ -29,7 +29,7 @@ npm run train:context -- --input data/corpus.txt --epochs 30 --learning-rate 0.0
 npm run generate:context -- --checkpoint artifacts/context-mlp-v1.json --prompt "Nexus " --tokens 160
 npm run prepare:dataset -- --input data/corpus.txt --output artifacts/dataset-manifest.json --seed 17
 npm run evaluate:manifest -- --manifest artifacts/dataset-manifest.json --epochs 10 --seed 17
-npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --epochs 1 --output artifacts/transformer-manifest-v1.json
+npm run train:transformer:manifest -- --manifest artifacts/dataset-manifest.json --epochs 1 --output artifacts/transformer-manifest-v1.json\nnpm run train:sweep -- --manifest artifacts/dataset-manifest.json --output-dir artifacts/sweep --workers 2 --epochs 1
 npm run evaluate -- --input data/corpus.txt --epochs 20
 ```
 
@@ -40,6 +40,10 @@ To serve a trained manifest checkpoint, set `NEXUS_TRANSFORMER_CHECKPOINT` to th
 ## Design limits
 
 The bigram baseline predicts one byte from the previous byte. The context MLP conditions on a fixed window of preceding bytes through learned embeddings and a hidden layer, and is trained with next-token cross-entropy. It is still a small experimental model—not a transformer, not a general-purpose assistant, and not evidence of semantic understanding. The seed corpus is far too small to produce useful language. The legacy evaluation CLI reports held-out negative log-likelihood and perplexity using an ordered 80/10/10 byte split. The manifest evaluation CLI instead trains both baselines only on train examples from the prepared manifest and reports validation/test metrics on their separate line-level splits. Each line is treated as an independent sequence. The dataset preparation CLI normalizes line-oriented text, removes exact normalized duplicates, hashes source and prepared content, and assigns stable per-example splits using a recorded seed. These evaluation protocols are distinct; compare model runs only when they use the same manifest, seed, and training settings. Both remain diagnostic on small corpora, not reliable estimates of generalization.
+
+## Concurrent training sweeps
+
+`npm run train:sweep -- --manifest artifacts/dataset-manifest.json --output-dir artifacts/sweep --workers 2 --epochs 1` launches four isolated candidate runs with a bounded concurrency pool. Each candidate gets its own checkpoint, checksum, and provenance sidecar. The sweep writes `sweep-summary.json` and ranks successful runs using validation negative log-likelihood only; test metrics are never used for ranking, and no candidate is automatically promoted to the serving endpoint. `--workers` accepts 1–8, `--epochs` accepts 1–1000, and `--seed` controls deterministic candidate seeds. The default two-worker setting enables parallel experiments without immediately saturating every CPU core. This is experiment orchestration, not a claim that the underlying single-block reference Transformer is production-scale; larger models remain constrained by the current CPU-oriented scalar backpropagation implementation and the quality/size of the licensed corpus.
 
 ## Database
 
