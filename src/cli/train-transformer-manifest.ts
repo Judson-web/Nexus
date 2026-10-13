@@ -173,8 +173,8 @@ async function main(): Promise<void> {
   const validationExamples = manifest.examples.filter((example) => example.split === "validation");
   const testExamples = manifest.examples.filter((example) => example.split === "test");
   const heldOutEvaluation = {
-    validation: scoreSplit(validationExamples, model, tokenizer, config.contextSize),
-    test: scoreSplit(testExamples, model, tokenizer, config.contextSize),
+    validation: scoreSplit(validationExamples, model, tokenizer, modelConfig.contextSize),
+    test: scoreSplit(testExamples, model, tokenizer, modelConfig.contextSize),
     testUsedForModelSelection: false,
   };
 
