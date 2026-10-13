@@ -5,6 +5,7 @@ import { validateDatasetManifest } from "../evaluation/manifest.js";
 import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel } from "../model/transformer-model.js";
 import { EOS_TOKEN_ID } from "../tokenizer/byte-tokenizer.js";
 import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
+import { makeOverlappingTokenWindows } from "../training/token-windows.js";
 
 function parseArgs(args: string[]): Map<string, string> {
   const options = new Map<string, string>();
@@ -110,6 +111,8 @@ async function main(): Promise<void> {
   let weightedLoss = 0;
   let trainedTokens = 0;
   let truncatedExamples = 0;
+  let totalEncodedTokens = 0;
+  let trainingWindowCount = 0;
   let lastGradientNorm = 0;
   let lastGradientScale = 1;
 
@@ -120,23 +123,23 @@ async function main(): Promise<void> {
   for (const example of trainingExamples) {
     exampleIndex += 1;
     if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit before example ${exampleIndex}/${trainingExamples.length}.`);
-    let tokens = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
-    if (tokens.length > maxTokensPerExample) {
-      // Keep a deterministic prefix and restore EOS so each bounded training
-      // sequence has a valid terminal target rather than a random cut-off.
-      tokens = [...tokens.slice(0, maxTokensPerExample - 1), EOS_TOKEN_ID];
-      truncatedExamples += 1;
-    }
+    const tokens = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
+    totalEncodedTokens += tokens.length;
     if (tokens.length < 2) continue;
-    console.error(`[train] example ${exampleIndex}/${trainingExamples.length}; targets=${tokens.length - 1}; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
-    const metrics = model.train(tokens, learningRate, epochs, 1, optimizer, (progress) => {
-      if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit during example ${exampleIndex}/${trainingExamples.length}.`);
-      console.error(`[train] example ${exampleIndex}/${trainingExamples.length} epoch ${progress.epoch}/${progress.epochs}: ${progress.targetsProcessed}/${progress.totalTargets} targets; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
-    }, targetStride);
-    weightedLoss += metrics.loss * metrics.examples;
-    trainedTokens += metrics.examples;
-    lastGradientNorm = metrics.gradientNorm;
-    lastGradientScale = metrics.gradientScale;
+    const windows = makeOverlappingTokenWindows(tokens, maxTokensPerExample, Math.min(config.contextSize, maxTokensPerExample - 1));
+    trainingWindowCount += windows.length;
+    console.error(`[train] example ${exampleIndex}/${trainingExamples.length}; tokens=${tokens.length}; windows=${windows.length}; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
+    for (const [windowIndex, window] of windows.entries()) {
+      if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit during example ${exampleIndex}/${trainingExamples.length}, window ${windowIndex + 1}/${windows.length}.`);
+      const metrics = model.train(window.tokens, learningRate, epochs, 1, optimizer, (progress) => {
+        if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit during example ${exampleIndex}/${trainingExamples.length}.`);
+        console.error(`[train] example ${exampleIndex}/${trainingExamples.length} window ${windowIndex + 1}/${windows.length} epoch ${progress.epoch}/${progress.epochs}: ${progress.targetsProcessed}/${progress.totalTargets} targets; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
+      }, targetStride, window.targetStartIndex);
+      weightedLoss += metrics.loss * metrics.examples;
+      trainedTokens += metrics.examples;
+      lastGradientNorm = metrics.gradientNorm;
+      lastGradientScale = metrics.gradientScale;
+    }
   }
   if (trainedTokens === 0) throw new Error("Training examples contain no usable next-token targets.");
 
@@ -173,6 +176,10 @@ async function main(): Promise<void> {
       maxTokensPerExample,
       targetStride,
       truncatedExamples,
+      totalEncodedTokens,
+      trainingWindowCount,
+      droppedTokens: 0,
+      truncatedTokens: 0,
       trainedNextTokenTargets: trainedTokens,
       meanFinalTrainingLoss: weightedLoss / trainedTokens,
       lastGradientNorm, lastGradientScale,
