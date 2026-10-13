@@ -76,7 +76,7 @@ async function getPinnedRevision(timeoutMs: number): Promise<string> {
     throw new Error("Hugging Face did not return a valid immutable dataset revision.");
   }
   const license = metadata.cardData?.license;
-  if (typeof license !== "string" || !["cc-by-sa-3.0", "cc-by-sa-3.0-de"].includes(license.toLowerCase())) {
+  if (typeof license !== "string" || !["cc-by-sa-3.0,gfdl", "cc-by-sa-3.0", "cc-by-sa-3.0-de"].includes(license.toLowerCase())) {
     throw new Error(`Unexpected WikiText dataset license metadata: ${String(license)}. Refusing acquisition until reviewed.`);
   }
   return metadata.sha;
@@ -156,7 +156,7 @@ async function main(): Promise<void> {
     config: CONFIG,
     revision,
     datasetUrl: `https://huggingface.co/datasets/${DATASET}/tree/${revision}/${CONFIG}`,
-    license: "CC BY-SA 3.0 (dataset card metadata verified; retain attribution and share-alike obligations)",
+    license: "CC BY-SA 3.0 and GFDL (dataset card metadata verified; review and comply with the applicable source terms)",
     licenseUrl: "https://creativecommons.org/licenses/by-sa/3.0/",
     retrieval: {
       method: "Hugging Face datasets-server rows API; immutable dataset revision checked before and after retrieval",
