@@ -155,3 +155,17 @@ test("Transformer can train only targets after a context-only window prefix", ()
   assert.equal(metrics.examples, 4);
   assert.ok(Number.isFinite(metrics.loss));
 });
+
+
+test("typed-array Transformer training backend matches scalar updates on a tiny task", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 2, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 109 };
+  const tokens = [1, 2, 1, 3, 1, 2];
+  const scalar = new TransformerModel(tinyConfig);
+  const tape = new TransformerModel(tinyConfig);
+  scalar.train(tokens, 0.0001, 1, 1, "adam", undefined, 1, 1, "scalar");
+  tape.train(tokens, 0.0001, 1, 1, "adam", undefined, 1, 1, "tape");
+  const a = scalar.toCheckpoint().weights;
+  const b = tape.toCheckpoint().weights;
+  assert.equal(a.length, b.length);
+  for (let i = 0; i < a.length; i++) assert.ok(Math.abs(a[i]! - b[i]!) < 1e-8, `weight ${i} diverged`);
+});
