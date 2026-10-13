@@ -7,6 +7,7 @@ import type { TransformerCheckpoint } from "../model/transformer-model.js";
 import { EOS_TOKEN_ID } from "../tokenizer/byte-tokenizer.js";
 import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
 import { makeOverlappingTokenWindows } from "../training/token-windows.js";
+import { orderTrainingExamples } from "../training/data-ordering.js";
 
 function parseArgs(args: string[]): Map<string, string> {
   const options = new Map<string, string>();
@@ -17,7 +18,7 @@ function parseArgs(args: string[]): Map<string, string> {
     const value = args[i + 1];
     if (!value || value.startsWith("--")) throw new Error(`Missing value for ${key}`);
     if (options.has(name)) throw new Error(`Duplicate option: ${key}`);
-    if (!["manifest", "output", "initial-checkpoint", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "gradient-backend", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
+    if (!["manifest", "output", "initial-checkpoint", "epochs", "seed", "learning-rate", "context-size", "embedding-size", "heads", "feed-forward-size", "optimizer", "gradient-backend", "data-order", "max-minutes", "max-tokens-per-example", "target-stride"].includes(name)) {
       throw new Error(`Unknown option: ${key}`);
     }
     options.set(name, value);
@@ -131,6 +132,13 @@ async function main(): Promise<void> {
   const model = initialCheckpoint
     ? TransformerModel.fromCheckpoint(initialCheckpoint)
     : new TransformerModel(modelConfig);
+  const dataOrder = options.get("data-order") ?? "manifest";
+  if (dataOrder !== "manifest" && dataOrder !== "length-cyclic") throw new RangeError("data-order must be manifest or length-cyclic.");
+  const orderedTrainingExamples = orderTrainingExamples(
+    trainingExamples,
+    (text) => tokenizer.encode(text, false).length,
+    dataOrder,
+  );
   let weightedLoss = 0;
   let trainedTokens = 0;
   let truncatedExamples = 0;
@@ -143,7 +151,7 @@ async function main(): Promise<void> {
   // passed to train(); validation and test text are provenance-only here.
   let exampleIndex = 0;
   const startedAt = Date.now();
-  for (const example of trainingExamples) {
+  for (const example of orderedTrainingExamples) {
     exampleIndex += 1;
     if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit before example ${exampleIndex}/${trainingExamples.length}.`);
     const tokens = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
@@ -189,11 +197,11 @@ async function main(): Promise<void> {
       preparedSha256: manifest.preparedSha256,
       splitSeed: manifest.splitSeed,
       splitCounts: manifest.splits,
-      trainingExampleIds: trainingExamples.map((example) => example.id),
+      trainingExampleIds: orderedTrainingExamples.map((example) => example.id),
       validationAndTestUsedForTraining: false,
     },
     training: {
-      seed, epochsPerExample: epochs, learningRate, optimizer, gradientBackend,
+      seed, epochsPerExample: epochs, learningRate, optimizer, gradientBackend, dataOrder,
       resumedFromCheckpoint: initialCheckpointPath ?? null,
       tokenizer: { type: "train-only byte-pair", merges: tokenizer.toJSON().merges.length, vocabSize: tokenizer.vocabSize },
       trainedExamples: trainingExamples.length,
