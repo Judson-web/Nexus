@@ -1,0 +1,93 @@
+name: Nexus public-domain full-text training
+
+on:
+  push:
+    branches:
+      - "feat/large-scale-public-domain-training"
+  workflow_dispatch:
+    inputs:
+      paragraphs_per_book:
+        description: "Deterministically sampled paragraphs per book (20-1000)"
+        required: true
+        default: "120"
+        type: string
+      epochs:
+        description: "Training epochs per sequence"
+        required: true
+        default: "1"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  acquire-train-evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - name: Acquire actual public-domain full text
+        run: npm run acquire:public-domain -- --paragraphs-per-book "${{ inputs.paragraphs_per_book || '120' }}" --output artifacts/public-domain-books
+      - name: Build source-preserving train, validation, and test manifest
+        run: npm run prepare:dataset:source-splits -- --train artifacts/public-domain-books/train.txt --validation artifacts/public-domain-books/validation.txt --test artifacts/public-domain-books/test.txt --source-name "Project Gutenberg public-domain books" --source-url "https://www.gutenberg.org/" --license "Curated US public-domain works; see per-work metadata in acquisition manifest" --attribution "Project Gutenberg ebook IDs, titles, authors, and text hashes in acquisition manifest" --output artifacts/public-domain-manifest.json
+      - name: Audit corpus and tokenizer coverage
+        run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/public-domain-manifest.json > artifacts/tokenizer-audit.json
+      - name: Train the model on the full-text corpus
+        run: npm run train:transformer:manifest -- --manifest artifacts/public-domain-manifest.json --output artifacts/nexus-public-domain-candidate.json --epochs "${{ inputs.epochs || '1' }}" --seed 17 --optimizer adam --context-size 32 --embedding-size 12 --heads 3 --feed-forward-size 48 --learning-rate 0.0003 --max-minutes 300 --max-tokens-per-example 384 --target-stride 4
+      - name: Verify provenance and held-out metrics
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            import { createHash } from "node:crypto";
+            const path = "artifacts/nexus-public-domain-candidate.json";
+            const checkpoint = readFileSync(path);
+            const digest = createHash("sha256").update(checkpoint).digest("hex");
+            const provenance = JSON.parse(readFileSync(path + ".provenance.json", "utf8"));
+            const manifest = JSON.parse(readFileSync("artifacts/public-domain-manifest.json", "utf8"));
+            if (provenance.checkpoint.sha256 !== digest) throw new Error("Checkpoint SHA-256 mismatch");
+            if (provenance.dataset.validationAndTestUsedForTraining !== false) throw new Error("Held-out data leakage flag invalid");
+            if (provenance.training.trainedExamples !== manifest.splits.train) throw new Error("Actual trained example count differs from train split");
+            if (provenance.model.embeddingSize < 12 || provenance.model.contextSize < 32) throw new Error("Scale-up configuration was not used");
+            for (const split of ["validation", "test"]) {
+              const score = provenance.heldOutEvaluation[split];
+              if (!Number.isFinite(score.negativeLogLikelihood) || !Number.isFinite(score.perplexity) || score.tokens < 1) throw new Error("Invalid held-out score: " + split);
+            }
+            writeFileSync("artifacts/training-summary.json", JSON.stringify({
+              dataset: manifest.dataset,
+              trainSplit: manifest.splits.train,
+              validationSplit: manifest.splits.validation,
+              testSplit: manifest.splits.test,
+              training: provenance.training,
+              model: provenance.model,
+              heldOutEvaluation: provenance.heldOutEvaluation,
+              checkpointSha256: digest,
+              generatedTextRequiredForPromotion: true,
+            }, null, 2) + "\n");
+            console.log(readFileSync("artifacts/training-summary.json", "utf8"));
+          '
+      - name: Generate samples for human-readable quality review
+        run: |
+          mkdir -p artifacts/generation-samples
+          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/nexus-public-domain-candidate.json --prompt "It was a dark and stormy night" --tokens 160 > artifacts/generation-samples/story.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/nexus-public-domain-candidate.json --prompt "The natural world" --tokens 160 > artifacts/generation-samples/nature.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint artifacts/nexus-public-domain-candidate.json --prompt "The meaning of knowledge" --tokens 160 > artifacts/generation-samples/knowledge.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-public-domain-fulltext-${{ github.run_id }}
+          path: |
+            artifacts/public-domain-books/
+            artifacts/public-domain-manifest.json
+            artifacts/nexus-public-domain-candidate.json
+            artifacts/nexus-public-domain-candidate.json.sha256
+            artifacts/nexus-public-domain-candidate.json.provenance.json
+            artifacts/tokenizer-audit.json
+            artifacts/training-summary.json
+            artifacts/generation-samples/
+          if-no-files-found: error
+          retention-days: 30
