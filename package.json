@@ -27,7 +27,8 @@
     "train:transformer:manifest": "tsx src/cli/train-transformer-manifest.ts",
     "train:sweep": "tsx src/cli/train-sweep.ts",
     "acquire:common-pile": "tsx src/cli/acquire-common-pile.ts",
-    "audit:tokenizer": "tsx src/cli/audit-tokenizer.ts"
+    "audit:tokenizer": "tsx src/cli/audit-tokenizer.ts",
+    "acquire:wikitext": "tsx src/cli/acquire-wikitext.ts"
   },
   "dependencies": {
     "next": "^15.5.0",
