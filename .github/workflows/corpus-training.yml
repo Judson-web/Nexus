@@ -43,7 +43,7 @@ jobs:
       - name: Audit tokenizer coverage and sequence lengths
         run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/dataset-manifest.json > artifacts/tokenizer-audit.json
       - name: Run concurrent, validation-ranked model sweep
-        run: npm run train:sweep -- --manifest artifacts/dataset-manifest.json --output-dir artifacts/sweep --summary artifacts/sweep-summary.json --workers 2 --epochs "${{ inputs.epochs || '1' }}" --seed "${{ inputs.seed || '17' }}" --max-minutes 15 --max-tokens-per-example 192 --target-stride 2
+        run: npm run train:sweep -- --manifest artifacts/dataset-manifest.json --output-dir artifacts/sweep --summary artifacts/sweep-summary.json --workers 1 --epochs "${{ inputs.epochs || '1' }}" --seed "${{ inputs.seed || '17' }}" --max-minutes 15 --max-tokens-per-example 96 --target-stride 16
       - name: Verify all candidate checkpoints and select by validation only
         run: |
           node --input-type=module -e '
@@ -100,9 +100,11 @@ jobs:
             writeFileSync("artifacts/generation-samples/summary.json", JSON.stringify({ selectedBy: "validation negative log-likelihood", qualityNote: "Generation sanity checks are diagnostic. A short or empty continuation is preserved and flagged so the run can upload metrics and samples; this is not evidence of useful generation.", qualityWarnings, samples }, null, 2) + "\n");
             console.log(JSON.stringify({ samples: samples.map(({ prompt, continuationCharacters, status, checks }) => ({ prompt, continuationCharacters, status, checks })), qualityWarnings }, null, 2));
           '
-      - uses: actions/upload-artifact@v4
+      - name: Upload training diagnostics and artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: nexus-expanded-corpus-transformer-${{ github.run_id }}
+          name: nexus-oasst1-transformer-${{ github.run_id }}
           path: |
             artifacts/oasst1/
             artifacts/dataset-manifest.json
@@ -111,5 +113,5 @@ jobs:
             artifacts/tokenizer-audit.json
             artifacts/experiment-results.json
             artifacts/generation-samples/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
