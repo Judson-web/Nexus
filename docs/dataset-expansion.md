@@ -15,6 +15,29 @@
 | Project Gutenberg works | Books, language varies | **Per-work review required** | Check each work's status in the relevant jurisdiction and any additional terms. Do not infer a global public-domain guarantee from the collection brand. |
 | Official technical documentation | Programming and computing | **Source-by-source review required** | Record exact repository/page revision and license. Publicly accessible documentation is not automatically licensed for model training or redistribution. |
 
+## Reviewed instruction-tuning source: Smol-SmolTalk
+
+A bounded adapter is available for `HuggingFaceTB/smol-smoltalk`:
+
+```sh
+npm run acquire:smol-smoltalk -- --max-train-rows 1200 --max-test-rows 200 --output artifacts/smol-smoltalk
+npm run prepare:dataset:source-splits -- \
+  --train artifacts/smol-smoltalk/train.txt \
+  --validation artifacts/smol-smoltalk/validation.txt \
+  --test artifacts/smol-smoltalk/test.txt \
+  --source-name "HuggingFaceTB/smol-smoltalk:smol-magpie-ultra-short" \
+  --source-url "https://huggingface.co/datasets/HuggingFaceTB/smol-smoltalk" \
+  --license "Apache-2.0" \
+  --attribution "Hugging Face Smol Models Research, Smol-SmolTalk / Smol-Magpie-Ultra; arXiv:2502.02737" \
+  --output artifacts/smol-smoltalk-manifest.json
+```
+
+The acquisition script verifies the pinned Hub revision and Apache-2.0 card license before and after retrieval, queries the Dataset Viewer filter endpoint in bounded pages, and accepts only the exact `smol-magpie-ultra-short` source label. It preserves the upstream test split and derives a deterministic validation partition from the selected training rows. The upstream license and a citation are included with the artifact.
+
+Do not remove the source filter or point this adapter at the `all` SmolTalk mix. Other source labels include datasets with separate license terms. The adapter is intentionally conservative: only a single-turn user/assistant pair with an optional system instruction is accepted, obvious PII-like values are dropped, mixed-role conversations are excluded, and cross-split exact duplicates cause a hard failure.
+
+Use the resulting manifest for an independent experiment first. The TypeScript scalar-autodiff backend is slow; a 1,200-row data cap is a small reproducible comparison set, not a claim that this is the full dataset or enough data for a capable general-purpose model. Measure response-only validation loss and inspect generated conversation samples before considering any mixed-corpus run.
+
 ## Ingestion gates (must fail closed)
 
 Every newly approved source must have a source card documenting:
