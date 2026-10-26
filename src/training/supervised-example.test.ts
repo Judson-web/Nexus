@@ -57,7 +57,7 @@ test("multi-turn SFT scores only the final assistant reply", () => {
   const prefix = text.slice(0, marker + " Assistant: ".length);
   const response = text.slice(marker + " Assistant: ".length);
   const encoded = encodeTrainingExample(text, tokenizer, 32);
-  assert.deepEqual(encoded.tokens.slice(0, encoded.lossStartIndex), tokenizer.encode(prefix, false));
+  assert.deepEqual(encoded.tokens.slice(0, encoded.lossStartIndex), tokenizer.encode(prefix, false).slice(-32));
   assert.deepEqual(encoded.tokens.slice(encoded.lossStartIndex, -1), tokenizer.encode(response, false));
   assert.equal(encoded.lossPolicy, "assistant-only-for-user-assistant-pairs-v1");
 });

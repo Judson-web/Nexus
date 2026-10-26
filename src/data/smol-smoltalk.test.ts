@@ -63,7 +63,7 @@ test("Smol adapter returns safe rejection diagnostics without exposing text", ()
     { role: "assistant", content: "Hello." },
   ]), "train");
   assert.equal(invalid.example, null);
-  assert.equal(invalid.rejectionReason, "user-text-too-short");
+  assert.equal(invalid.rejectionReason, "final-user-text-too-short");
 });
 
 test("Smol adapter rejects PII-like values and too-short/long answers", () => {
