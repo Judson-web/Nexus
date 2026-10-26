@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   prepareSmolRow,
+  prepareSmolRowWithReason,
   sampledPageOffsets,
   sha256,
   SMOL_MAGPIE_SOURCE,
@@ -121,6 +122,7 @@ async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ e
   let scannedRows = 0;
   const seenContent = new Map<string, SmolPreparedSplit>();
   const sourceLabelCounts: Record<string, number> = {};
+  const rejectionReasonCounts: Record<string, number> = {};
   const metadata = await fetchPage(split, 0, 1);
   const datasetRowsTotal = metadata.num_rows_total!;
   // Distribute a strict row budget across the entire official split instead of
@@ -142,8 +144,13 @@ async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ e
         ? (item.row as { source: string }).source
         : "<missing-source>";
       sourceLabelCounts[sourceLabel] = (sourceLabelCounts[sourceLabel] ?? 0) + 1;
-      const prepared = prepareSmolRow({ row_idx: item.row_idx, row: item.row }, split);
-      if (!prepared) continue;
+      const preparation = prepareSmolRowWithReason({ row_idx: item.row_idx, row: item.row }, split);
+      const prepared = preparation.example;
+      if (!prepared) {
+        const reason = preparation.rejectionReason ?? "unknown-rejection";
+        rejectionReasonCounts[reason] = (rejectionReasonCounts[reason] ?? 0) + 1;
+        continue;
+      }
       const previousSplit = seenContent.get(prepared.contentSha256);
       if (previousSplit) {
         if (previousSplit !== prepared.split) throw new Error(`Duplicate example crosses ${previousSplit}/${prepared.split} boundary (sha256 ${prepared.contentSha256}).`);
@@ -153,7 +160,7 @@ async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ e
       examples.push(prepared);
     }
   }
-  return { examples, scannedRows, datasetRowsTotal, sampleOffsets, sourceLabelCounts };
+  return { examples, scannedRows, datasetRowsTotal, sampleOffsets, sourceLabelCounts, rejectionReasonCounts };
 }
 
 function textBySplit(examples: readonly SmolPreparedExample[]): Record<SmolPreparedSplit, string[]> {
@@ -185,7 +192,7 @@ async function main(): Promise<void> {
 
   const splitTexts = textBySplit(allExamples);
   if (splitTexts.train.length < 50 || splitTexts.validation.length < 10 || splitTexts.test.length < 10) {
-    throw new Error(`Insufficient usable source examples after filtering: train=${splitTexts.train.length}, validation=${splitTexts.validation.length}, test=${splitTexts.test.length}. Source labels observed: train=${JSON.stringify(trainPage.sourceLabelCounts)}, test=${JSON.stringify(testPage.sourceLabelCounts)}.`);
+    throw new Error(`Insufficient usable source examples after filtering: train=${splitTexts.train.length}, validation=${splitTexts.validation.length}, test=${splitTexts.test.length}. Source labels observed: train=${JSON.stringify(trainPage.sourceLabelCounts)}, test=${JSON.stringify(testPage.sourceLabelCounts)}. Rejections: train=${JSON.stringify(trainPage.rejectionReasonCounts)}, test=${JSON.stringify(testPage.rejectionReasonCounts)}.`);
   }
 
   await verifyRevision();
@@ -213,7 +220,7 @@ async function main(): Promise<void> {
     retrievalMethod: "Hugging Face Dataset Viewer /rows API at default config with a bounded scan and exact source-label allowlist applied locally",
     filter: { source: SMOL_MAGPIE_SOURCE, licenseScope: "only the source label for the Apache-2.0 Smol-Magpie-Ultra-derived subset; no mixed-source rows accepted" },
     caps: { maxTrainRowsScanned: maxTrainRows, maxTestRowsScanned: maxTestRows },
-    rows: { trainDatasetRowsTotal: trainPage.datasetRowsTotal, testDatasetRowsTotal: testPage.datasetRowsTotal, trainScanned: trainPage.scannedRows, testScanned: testPage.scannedRows, trainSampleOffsets: trainPage.sampleOffsets, testSampleOffsets: testPage.sampleOffsets, trainSourceLabelCounts: trainPage.sourceLabelCounts, testSourceLabelCounts: testPage.sourceLabelCounts },
+    rows: { trainDatasetRowsTotal: trainPage.datasetRowsTotal, testDatasetRowsTotal: testPage.datasetRowsTotal, trainScanned: trainPage.scannedRows, testScanned: testPage.scannedRows, trainSampleOffsets: trainPage.sampleOffsets, testSampleOffsets: testPage.sampleOffsets, trainSourceLabelCounts: trainPage.sourceLabelCounts, testSourceLabelCounts: testPage.sourceLabelCounts, trainRejectionReasons: trainPage.rejectionReasonCounts, testRejectionReasons: testPage.rejectionReasonCounts },
     acceptedExamples: allExamples.length,
     splits: Object.fromEntries(Object.entries(splitTexts).map(([split, examples]) => [split, examples.length])),
     sourceFileSha256: { train: sha256(trainPage.examples.map((item) => `${item.rowIndex}:${item.contentSha256}`).join("\n")), test: sha256(testPage.examples.map((item) => `${item.rowIndex}:${item.contentSha256}`).join("\n")) },
@@ -254,6 +261,7 @@ async function main(): Promise<void> {
     datasetRowsTotal: { train: trainPage.datasetRowsTotal, test: testPage.datasetRowsTotal },
     sampledOffsets: { train: trainPage.sampleOffsets, test: testPage.sampleOffsets },
     sourceLabelCounts: { train: trainPage.sourceLabelCounts, test: testPage.sourceLabelCounts },
+    rejectionReasonCounts: { train: trainPage.rejectionReasonCounts, test: testPage.rejectionReasonCounts },
     scannedRows: { train: trainPage.scannedRows, test: testPage.scannedRows },
     acceptedExamples: allExamples.length, splits: manifest.splits,
   }, null, 2));

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { prepareSmolRow, sampledPageOffsets, SMOL_MAGPIE_SOURCE } from "./smol-smoltalk.js";
+import { prepareSmolRow, prepareSmolRowWithReason, sampledPageOffsets, SMOL_MAGPIE_SOURCE } from "./smol-smoltalk.js";
 
 function row(row_idx: number, source = SMOL_MAGPIE_SOURCE, messages = [
   { role: "user", content: "Can you explain how rainbows form in the sky?" },
@@ -41,6 +41,15 @@ test("Smol adapter retains optional system instructions and escapes prompt delim
   assert.match(example.text, /^User: System instruction:/);
   assert.match(example.text, /Assistant :/);
   assert.match(example.text, / Assistant: The marker/);
+});
+
+test("Smol adapter returns safe rejection diagnostics without exposing text", () => {
+  const invalid = prepareSmolRowWithReason(row(58, SMOL_MAGPIE_SOURCE, [
+    { role: "user", content: "Say hi." },
+    { role: "assistant", content: "Hello." },
+  ]), "train");
+  assert.equal(invalid.example, null);
+  assert.equal(invalid.rejectionReason, "user-text-too-short");
 });
 
 test("Smol adapter rejects PII-like values and too-short/long answers", () => {
