@@ -1,0 +1,9 @@
+# Optional dependencies for pretrained LoRA fine-tuning.
+# Install into a Python 3.10+ virtual environment. A CUDA-enabled PyTorch build
+# is recommended; CPU-only training is supported but can be slow.
+torch>=2.4.0
+transformers>=4.46.0,<6.0
+datasets>=3.0.0,<5.0
+accelerate>=1.0.0,<2.0
+peft>=0.13.0,<1.0
+trl>=0.20.0,<2.0
