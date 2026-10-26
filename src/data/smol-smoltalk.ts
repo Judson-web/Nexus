@@ -47,20 +47,6 @@ function textIssue(value: string, maxCharacters: number): string | null {
   return null;
 }
 
-function parseMessages(value: unknown): readonly { role: string; content: string }[] | null {
-  if (!Array.isArray(value) || (value.length !== 2 && value.length !== 3)) return null;
-  const messages: { role: string; content: string }[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") return null;
-    const record = item as { role?: unknown; content?: unknown };
-    if (typeof record.role !== "string" || typeof record.content !== "string") return null;
-    messages.push({ role: record.role.toLowerCase(), content: record.content });
-  }
-  const roles = messages.map((message) => message.role);
-  const valid = roles.join(",") === "user,assistant" || roles.join(",") === "system,user,assistant";
-  return valid ? messages : null;
-}
-
 /**
  * Converts only the explicitly Apache-2.0 Smol-Magpie-Ultra short subset into
  * the current Nexus single-turn SFT format. Mixed-source rows are rejected.
