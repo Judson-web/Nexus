@@ -26,8 +26,8 @@ export function encodeTrainingExample(
   if (!Number.isSafeInteger(contextSize) || contextSize < 1) {
     throw new RangeError("contextSize must be a positive integer.");
   }
-  if (maxTokens !== undefined && (!Number.isSafeInteger(maxTokens) || maxTokens < contextSize + 1)) {
-    throw new RangeError("maxTokens must be an integer greater than contextSize.");
+  if (maxTokens !== undefined && (!Number.isSafeInteger(maxTokens) || maxTokens < 2)) {
+    throw new RangeError("maxTokens must be an integer of at least 2 so the sample can contain a context and a target.");
   }
 
   const delimiterIndex = text.startsWith(PAIR_PREFIX) ? text.indexOf(ASSISTANT_SEPARATOR, PAIR_PREFIX.length) : -1;
@@ -35,7 +35,8 @@ export function encodeTrainingExample(
   const response = responseStart < 0 ? "" : text.slice(responseStart).trim();
   if (delimiterIndex >= 0 && response.length > 0) {
     const prefixText = text.slice(0, responseStart);
-    const promptTokens = tokenizer.encode(prefixText, false).slice(-contextSize);
+    const promptLimit = maxTokens === undefined ? contextSize : Math.min(contextSize, maxTokens - 1);
+    const promptTokens = tokenizer.encode(prefixText, false).slice(-promptLimit);
     const responseTokens = tokenizer.encode(response, false);
     const tailBudget = maxTokens === undefined ? Number.POSITIVE_INFINITY : maxTokens - promptTokens.length;
     if (tailBudget < 1) throw new Error("maxTokens leaves no room for an assistant response.");
