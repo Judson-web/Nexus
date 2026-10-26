@@ -18,6 +18,26 @@ Review date: 2026-10-26
 - Useful lessons: simple reproducible training loops, explicit held-out evaluation, and keeping experiments inspectable.
 - Limitation: nanoGPT relies on PyTorch tensor kernels. Copying its model loop into Nexus's scalar TypeScript autodiff would not provide equivalent throughput. A tensorized backend is a separate engineering task.
 
+### `Lightning-AI/litgpt` (Apache-2.0)
+
+- Repository: https://github.com/Lightning-AI/litgpt
+- License: Apache-2.0.
+- Useful lessons: explicit pretraining, fine-tuning, evaluation and deployment recipes; implementation patterns for checkpoint conversion, memory-aware runs, and controlled experiments.
+- Limitation: its optimized implementation depends on Python/PyTorch and accelerator-oriented kernels. Reusing the recipes is practical; transplanting them into Nexus's scalar TypeScript autodiff is not.
+
+### `karpathy/llm.c` (MIT)
+
+- Repository: https://github.com/karpathy/llm.c
+- License: MIT.
+- Useful lessons: a readable C CPU reference path, CUDA training kernels, small debug-state fixtures and tests comparing logits/loss/gradients against a framework implementation. These are good references for a future native or WebGPU compute backend.
+- Limitation: the performant path is CUDA/C and the CPU path is explicitly a teaching/reference implementation. Porting its numerical kernels or a compatible architecture is a separate project. Preserve the MIT notice if source code is copied.
+
+### Optional local inference baseline: SmolLM2-135M-Instruct (Apache-2.0)
+
+- Model card: https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct
+- The official card declares Apache-2.0 and documents a `@huggingface/transformers` / Transformers.js path for local text generation. This could provide an on-device, no-inference-API comparison baseline while Nexus's from-scratch model remains research-only.
+- This is a different track from training Nexus from scratch: it reuses a pretrained checkpoint, tokenizer, and chat template. Keep the model ID, pinned revision, license, weight checksums, hardware requirements, and user-data boundary explicit. Evaluate browser WebGPU/CPU memory and cold-start behavior before choosing it for the deployed app.
+
 ## Dataset review
 
 ### OpenAssistant OASST1 (Apache-2.0)
