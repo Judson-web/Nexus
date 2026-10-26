@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   prepareSmolRow,
+  sampledPageOffsets,
   sha256,
   SMOL_MAGPIE_SOURCE,
   SMOL_SMOLTALK_DATASET,
