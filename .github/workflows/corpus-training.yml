@@ -77,11 +77,11 @@ jobs:
           checkpoint=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; const r = JSON.parse(readFileSync("artifacts/experiment-results.json", "utf8")); const path = r.experiments[0]?.output; if (typeof path !== "string") throw new Error("No validation-ranked checkpoint"); process.stdout.write(path);')
           test -s "$checkpoint"
           mkdir -p artifacts/generation-samples
-          npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "The universe is" --tokens 120 > artifacts/generation-samples/universe.txt
-          npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "In this paper, we present" --tokens 120 > artifacts/generation-samples/research.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "User: Explain what a black hole is in simple terms. Assistant: " --tokens 120 > artifacts/generation-samples/universe.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "User: Write a short introduction to scientific research. Assistant: " --tokens 120 > artifacts/generation-samples/research.txt
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
-            const prompts = ["The universe is", "In this paper, we present"];
+            const prompts = ["User: Explain what a black hole is in simple terms. Assistant: ", "User: Write a short introduction to scientific research. Assistant: "];
             const files = ["artifacts/generation-samples/universe.txt", "artifacts/generation-samples/research.txt"];
             const samples = files.map((path, index) => {
               const text = readFileSync(path, "utf8");
