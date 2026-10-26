@@ -122,7 +122,11 @@ function makePairs(messages: readonly Message[]): Pair[] {
     const prompt = byId.get(answer.parent_id);
     if (!prompt || (prompt.role !== "prompter" && prompt.role !== "user") ||
         prompt.message_tree_id !== answer.message_tree_id || !isUsable(prompt)) continue;
-    const text = `User: ${prompt.text.trim().replace(/\s+/gu, " ")} Assistant: ${answer.text.trim().replace(/\s+/gu, " ")}`;
+    // Escape the exact pair delimiter inside user content so the trainer can
+    // distinguish prompt context from assistant-only loss targets.
+    const promptText = prompt.text.trim().replace(/\s+/gu, " ").replace(/ Assistant: /gu, " Assistant : ");
+    const answerText = answer.text.trim().replace(/\s+/gu, " ");
+    const text = `User: ${promptText} Assistant: ${answerText}`;
     if (Buffer.byteLength(text, "utf8") > 5000) continue;
     const bucketValue = bucket(answer.message_tree_id);
     const split = bucketValue < 0.9 ? "train" : bucketValue < 0.95 ? "validation" : "test";
