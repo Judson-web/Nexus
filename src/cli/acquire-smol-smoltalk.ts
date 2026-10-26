@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -9,7 +8,6 @@ import {
   SMOL_SMOLTALK_DATASET,
   SMOL_SMOLTALK_LICENSE,
   SMOL_SMOLTALK_REVISION,
-  type DatasetViewerRow,
   type SmolPreparedExample,
   type SmolPreparedSplit,
   type SmolSourceSplit,
