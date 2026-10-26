@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora-rank", type=int, default=16)
     parser.add_argument("--seed", type=int, default=44)
     parser.add_argument("--max-train-examples", type=int, default=0, help="Optional deterministic cap; 0 uses the full training split.")
+    parser.add_argument("--merge-adapter", action="store_true", help="Also export a merged full model for self-hosted inference.")
     args = parser.parse_args()
     if not 0 < args.epochs <= 100:
         parser.error("--epochs must be in (0, 100].")
@@ -282,6 +283,14 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     trainer.save_model(str(args.output_dir))
     tokenizer.save_pretrained(str(args.output_dir))
+    merged_model_dir = None
+    if args.merge_adapter:
+        merged_path = args.output_dir / "merged"
+        merged_path.mkdir(parents=True, exist_ok=True)
+        merged_model = trainer.model.merge_and_unload()
+        merged_model.save_pretrained(str(merged_path), safe_serialization=True)
+        tokenizer.save_pretrained(str(merged_path))
+        merged_model_dir = str(merged_path)
     report = {
         "format": "nexus-pretrained-lora-run",
         "version": 1,
@@ -312,6 +321,7 @@ def main() -> int:
         "testMetrics": test_metrics,
         "testUsedForModelSelection": False,
         "licenseReminder": "Preserve source attribution and review both the base-model and data licenses before redistribution.",
+        "mergedModelDir": merged_model_dir,
         "note": "This is a LoRA adapter over an existing pretrained model, not from-scratch pretraining.",
     }
     (args.output_dir / "training-report.json").write_text(
