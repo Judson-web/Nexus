@@ -56,7 +56,8 @@ async function fetchBytes(url: URL): Promise<Uint8Array> {
         }
         return bytes;
       }
-      lastError = new Error(`HTTP ${response.status} from ${url.hostname}`);
+      const detail = (await response.text()).slice(0, 400).replace(/\s+/gu, " ").trim();
+      lastError = new Error(`HTTP ${response.status} from ${url.hostname}${url.pathname}${detail ? `: ${detail}` : ""}`);
       if (response.status < 500 && response.status !== 429) break;
     } catch (error) {
       lastError = error;
@@ -86,14 +87,16 @@ interface ViewerResponse {
 }
 
 async function fetchPage(split: SmolSourceSplit, offset: number, length: number): Promise<ViewerResponse> {
-  const url = new URL("https://datasets-server.huggingface.co/filter");
+  // The Filter API currently returns HTTP 500 for this dataset. Read only
+  // bounded slices and apply the exact-source allowlist locally rather than
+  // downloading Parquet files or the full mixed-source corpus.
+  const url = new URL("https://datasets-server.huggingface.co/rows");
   url.searchParams.set("dataset", SMOL_SMOLTALK_DATASET);
   url.searchParams.set("config", "default");
   url.searchParams.set("split", split);
-  url.searchParams.set("where", `"source"='${SMOL_MAGPIE_SOURCE}'`);
   url.searchParams.set("offset", String(offset));
   url.searchParams.set("length", String(length));
-  const response = await fetchBytes(url);
+    const response = await fetchBytes(url);
   const parsed = JSON.parse(new TextDecoder().decode(response)) as ViewerResponse;
   if (parsed.partial === true) throw new Error("Dataset Viewer returned a partial filter index; refusing an incomplete corpus.");
   if (!Array.isArray(parsed.rows) || !Array.isArray(parsed.features) ||
@@ -105,16 +108,16 @@ async function fetchPage(split: SmolSourceSplit, offset: number, length: number)
   return parsed;
 }
 
-async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ examples: SmolPreparedExample[]; scannedRows: number; matchedRows: number }> {
+async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ examples: SmolPreparedExample[]; scannedRows: number; datasetRowsTotal: number }> {
   const examples: SmolPreparedExample[] = [];
   let scannedRows = 0;
-  let matchedRows = 0;
+  let datasetRowsTotal = 0;
   const seenContent = new Map<string, SmolPreparedSplit>();
   for (let offset = 0; offset < maxRows; offset += 100) {
     const length = Math.min(100, maxRows - offset);
     const page = await fetchPage(split, offset, length);
-    if (offset === 0) matchedRows = page.num_rows_total!;
-    if (page.num_rows_total !== matchedRows) throw new Error("Smol-SmolTalk matching row count changed while paging; refusing a mixed snapshot.");
+    if (offset === 0) datasetRowsTotal = page.num_rows_total!;
+    if (page.num_rows_total !== datasetRowsTotal) throw new Error("Smol-SmolTalk dataset row count changed while paging; refusing a mixed snapshot.");
     for (const item of page.rows!) {
       scannedRows += 1;
       if (!Number.isSafeInteger(item.row_idx) || item.row_idx < 0) throw new Error("Invalid source row index.");
@@ -128,9 +131,9 @@ async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ e
       seenContent.set(prepared.contentSha256, prepared.split);
       examples.push(prepared);
     }
-    if (offset + length >= matchedRows) break;
+    if (offset + length >= datasetRowsTotal) break;
   }
-  return { examples, scannedRows, matchedRows };
+  return { examples, scannedRows, datasetRowsTotal };
 }
 
 function textBySplit(examples: readonly SmolPreparedExample[]): Record<SmolPreparedSplit, string[]> {
@@ -166,12 +169,18 @@ async function main(): Promise<void> {
   }
 
   await verifyRevision();
-  const licenseUrl = new URL(`https://huggingface.co/datasets/${SMOL_SMOLTALK_DATASET}/resolve/${SMOL_SMOLTALK_REVISION}/LICENSE?download=true`);
-  const licenseBytes = await fetchBytes(licenseUrl);
-  const licenseText = new TextDecoder().decode(licenseBytes);
-  if (!/Apache License|Apache-2\.0|Apache License, Version 2\.0/iu.test(licenseText)) {
-    throw new Error("Pinned upstream LICENSE file does not look like Apache-2.0.");
-  }
+  // This pinned dataset revision has README.md and data files but no standalone
+  // LICENSE file. Preserve the verified card license and canonical license URL
+  // instead of pretending an upstream LICENSE file was retrieved.
+  const licenseNotice = [
+    "Dataset: " + SMOL_SMOLTALK_DATASET,
+    "Pinned revision: " + SMOL_SMOLTALK_REVISION,
+    "Dataset card license field (verified via Hugging Face Hub API): " + SMOL_SMOLTALK_LICENSE,
+    "Selected source label: " + SMOL_MAGPIE_SOURCE,
+    "License evidence: https://huggingface.co/datasets/HuggingFaceTB/smoltalk (the upstream card documents Apache-2.0 for the newly created Smol-Magpie-Ultra subset).",
+    "Canonical Apache-2.0 license text: https://www.apache.org/licenses/LICENSE-2.0.txt",
+    "This source revision has no standalone LICENSE file; this is a provenance notice, not a copy of the license text.",
+  ].join("\n") + "\n";
   const manifest = {
     format: "nexus-reviewed-conversation-corpus",
     formatVersion: 1,
@@ -179,11 +188,12 @@ async function main(): Promise<void> {
     revision: SMOL_SMOLTALK_REVISION,
     sourceUrl: `https://huggingface.co/datasets/${SMOL_SMOLTALK_DATASET}/tree/${SMOL_SMOLTALK_REVISION}`,
     license: SMOL_SMOLTALK_LICENSE,
-    attribution: "Hugging Face Smol Models Research contributors, Smol-SmolTalk; subset source smol-magpie-ultra-short; Apache-2.0. Retain upstream LICENSE and citation to SmolLM2 (arXiv:2502.02737).",
-    retrievalMethod: "Hugging Face Dataset Viewer /filter API at default config, filtered by exact source field",
-    filter: { source: SMOL_MAGPIE_SOURCE, licenseScope: "only the explicitly Apache-2.0 Smol-Magpie-Ultra-derived source; no mixed-source rows accepted" },
+    attribution: "Hugging Face Smol Models Research contributors, Smol-SmolTalk; subset source smol-magpie-ultra-short; Apache-2.0 as declared in the pinned dataset card. See the upstream SmolTalk card and SmolLM2 citation (arXiv:2502.02737).",
+    licenseEvidence: { datasetCardUrl: `https://huggingface.co/datasets/${SMOL_SMOLTALK_DATASET}/tree/${SMOL_SMOLTALK_REVISION}`, hubCardLicense: SMOL_SMOLTALK_LICENSE, subsetLicenseSource: "https://huggingface.co/datasets/HuggingFaceTB/smoltalk", canonicalLicenseText: "https://www.apache.org/licenses/LICENSE-2.0.txt", standaloneLicenseFilePresent: false },
+    retrievalMethod: "Hugging Face Dataset Viewer /rows API at default config with a bounded scan and exact source-label allowlist applied locally",
+    filter: { source: SMOL_MAGPIE_SOURCE, licenseScope: "only the source label for the Apache-2.0 Smol-Magpie-Ultra-derived subset; no mixed-source rows accepted" },
     caps: { maxTrainRowsScanned: maxTrainRows, maxTestRowsScanned: maxTestRows },
-    rows: { trainMatchedTotal: trainPage.matchedRows, testMatchedTotal: testPage.matchedRows, trainScanned: trainPage.scannedRows, testScanned: testPage.scannedRows },
+    rows: { trainDatasetRowsTotal: trainPage.datasetRowsTotal, testDatasetRowsTotal: testPage.datasetRowsTotal, trainScanned: trainPage.scannedRows, testScanned: testPage.scannedRows },
     acceptedExamples: allExamples.length,
     splits: Object.fromEntries(Object.entries(splitTexts).map(([split, examples]) => [split, examples.length])),
     sourceFileSha256: { train: sha256(trainPage.examples.map((item) => `${item.rowIndex}:${item.contentSha256}`).join("\n")), test: sha256(testPage.examples.map((item) => `${item.rowIndex}:${item.contentSha256}`).join("\n")) },
@@ -210,7 +220,7 @@ async function main(): Promise<void> {
       await writeFile(`${staging}/${split}.txt`, examples.join("\n") + "\n", "utf8");
     }
     await writeFile(`${staging}/manifest.json`, JSON.stringify(manifest, null, 2) + "\n", "utf8");
-    await writeFile(`${staging}/SMOL-SMOLTALK-LICENSE`, licenseBytes);
+    await writeFile(`${staging}/SMOL-SMOLTALK-LICENSE-NOTICE.txt`, licenseNotice, "utf8");
     await writeFile(`${staging}/SMOL-SMOLTALK-CITATION.txt`, "SmolLM2: When Smol Goes Big -- Data-Centric Training of a Small Language Model. arXiv:2502.02737. https://arxiv.org/abs/2502.02737\n");
     await rm(output, { recursive: true, force: true });
     await rename(staging, output);
@@ -221,7 +231,7 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({
     output, dataset: SMOL_SMOLTALK_DATASET, revision: SMOL_SMOLTALK_REVISION,
     source: SMOL_MAGPIE_SOURCE, license: SMOL_SMOLTALK_LICENSE,
-    matchedRows: { train: trainPage.matchedRows, test: testPage.matchedRows },
+    datasetRowsTotal: { train: trainPage.datasetRowsTotal, test: testPage.datasetRowsTotal },
     scannedRows: { train: trainPage.scannedRows, test: testPage.scannedRows },
     acceptedExamples: allExamples.length, splits: manifest.splits,
   }, null, 2));
