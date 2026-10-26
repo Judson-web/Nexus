@@ -1,0 +1,53 @@
+name: Nexus Smol-SmolTalk data acquisition
+
+on:
+  push:
+    branches:
+      - "feat/**"
+    paths:
+      - "src/cli/acquire-smol-smoltalk.ts"
+      - "src/data/smol-smoltalk.ts"
+      - "src/data/smol-smoltalk.test.ts"
+      - "package.json"
+      - ".github/workflows/smol-smoltalk-data.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire-and-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - name: Acquire a bounded, source-filtered Smol-SmolTalk sample
+        run: npm run acquire:smol-smoltalk -- --max-train-rows 1200 --max-test-rows 200 --output artifacts/smol-smoltalk
+      - name: Validate explicit train, validation and test splits
+        run: |
+          npm run prepare:dataset:source-splits -- \
+            --train artifacts/smol-smoltalk/train.txt \
+            --validation artifacts/smol-smoltalk/validation.txt \
+            --test artifacts/smol-smoltalk/test.txt \
+            --source-name "HuggingFaceTB/smol-smoltalk:smol-magpie-ultra-short" \
+            --source-url "https://huggingface.co/datasets/HuggingFaceTB/smol-smoltalk" \
+            --license "Apache-2.0" \
+            --attribution "Hugging Face Smol Models Research, Smol-SmolTalk / Smol-Magpie-Ultra; arXiv:2502.02737" \
+            --output artifacts/smol-smoltalk-manifest.json
+      - name: Upload dataset manifest and license-preserving sample
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-smol-smoltalk-source-sample-${{ github.run_id }}
+          path: |
+            artifacts/smol-smoltalk/
+            artifacts/smol-smoltalk-manifest.json
+          if-no-files-found: warn
+          retention-days: 14
