@@ -96,9 +96,9 @@ async function fetchPage(split: SmolSourceSplit, offset: number, length: number)
   url.searchParams.set("split", split);
   url.searchParams.set("offset", String(offset));
   url.searchParams.set("length", String(length));
-    const response = await fetchBytes(url);
+  const response = await fetchBytes(url);
   const parsed = JSON.parse(new TextDecoder().decode(response)) as ViewerResponse;
-  if (parsed.partial === true) throw new Error("Dataset Viewer returned a partial filter index; refusing an incomplete corpus.");
+  if (parsed.partial === true) throw new Error("Dataset Viewer returned a partial row index; refusing an incomplete corpus.");
   if (!Array.isArray(parsed.rows) || !Array.isArray(parsed.features) ||
       !parsed.features.some((feature) => feature.name === "source") ||
       !parsed.features.some((feature) => feature.name === "messages") ||
@@ -108,19 +108,27 @@ async function fetchPage(split: SmolSourceSplit, offset: number, length: number)
   return parsed;
 }
 
-async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ examples: SmolPreparedExample[]; scannedRows: number; datasetRowsTotal: number }> {
+async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ examples: SmolPreparedExample[]; scannedRows: number; datasetRowsTotal: number; sampleOffsets: number[] }> {
   const examples: SmolPreparedExample[] = [];
   let scannedRows = 0;
-  let datasetRowsTotal = 0;
   const seenContent = new Map<string, SmolPreparedSplit>();
-  for (let offset = 0; offset < maxRows; offset += 100) {
-    const length = Math.min(100, maxRows - offset);
+  const metadata = await fetchPage(split, 0, 1);
+  const datasetRowsTotal = metadata.num_rows_total!;
+  // Distribute a strict row budget across the entire official split instead of
+  // assuming that the approved source occupies row zero or the first N rows.
+  const sampleOffsets = sampledPageOffsets(datasetRowsTotal, maxRows, 100);
+  const seenRowIds = new Set<number>();
+  for (const offset of sampleOffsets) {
+    const length = Math.min(100, maxRows - scannedRows, datasetRowsTotal - offset);
+    if (length <= 0) break;
     const page = await fetchPage(split, offset, length);
-    if (offset === 0) datasetRowsTotal = page.num_rows_total!;
-    if (page.num_rows_total !== datasetRowsTotal) throw new Error("Smol-SmolTalk dataset row count changed while paging; refusing a mixed snapshot.");
+    if (page.num_rows_total !== datasetRowsTotal) throw new Error("Smol-SmolTalk dataset row count changed while sampling; refusing a mixed snapshot.");
     for (const item of page.rows!) {
-      scannedRows += 1;
       if (!Number.isSafeInteger(item.row_idx) || item.row_idx < 0) throw new Error("Invalid source row index.");
+      // If small splits cause nearby pages to overlap, ignore repeated source row IDs.
+      if (seenRowIds.has(item.row_idx)) continue;
+      seenRowIds.add(item.row_idx);
+      scannedRows += 1;
       const prepared = prepareSmolRow({ row_idx: item.row_idx, row: item.row }, split);
       if (!prepared) continue;
       const previousSplit = seenContent.get(prepared.contentSha256);
@@ -131,9 +139,8 @@ async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ e
       seenContent.set(prepared.contentSha256, prepared.split);
       examples.push(prepared);
     }
-    if (offset + length >= datasetRowsTotal) break;
   }
-  return { examples, scannedRows, datasetRowsTotal };
+  return { examples, scannedRows, datasetRowsTotal, sampleOffsets };
 }
 
 function textBySplit(examples: readonly SmolPreparedExample[]): Record<SmolPreparedSplit, string[]> {
@@ -193,7 +200,7 @@ async function main(): Promise<void> {
     retrievalMethod: "Hugging Face Dataset Viewer /rows API at default config with a bounded scan and exact source-label allowlist applied locally",
     filter: { source: SMOL_MAGPIE_SOURCE, licenseScope: "only the source label for the Apache-2.0 Smol-Magpie-Ultra-derived subset; no mixed-source rows accepted" },
     caps: { maxTrainRowsScanned: maxTrainRows, maxTestRowsScanned: maxTestRows },
-    rows: { trainDatasetRowsTotal: trainPage.datasetRowsTotal, testDatasetRowsTotal: testPage.datasetRowsTotal, trainScanned: trainPage.scannedRows, testScanned: testPage.scannedRows },
+    rows: { trainDatasetRowsTotal: trainPage.datasetRowsTotal, testDatasetRowsTotal: testPage.datasetRowsTotal, trainScanned: trainPage.scannedRows, testScanned: testPage.scannedRows, trainSampleOffsets: trainPage.sampleOffsets, testSampleOffsets: testPage.sampleOffsets },
     acceptedExamples: allExamples.length,
     splits: Object.fromEntries(Object.entries(splitTexts).map(([split, examples]) => [split, examples.length])),
     sourceFileSha256: { train: sha256(trainPage.examples.map((item) => `${item.rowIndex}:${item.contentSha256}`).join("\n")), test: sha256(testPage.examples.map((item) => `${item.rowIndex}:${item.contentSha256}`).join("\n")) },
@@ -232,6 +239,7 @@ async function main(): Promise<void> {
     output, dataset: SMOL_SMOLTALK_DATASET, revision: SMOL_SMOLTALK_REVISION,
     source: SMOL_MAGPIE_SOURCE, license: SMOL_SMOLTALK_LICENSE,
     datasetRowsTotal: { train: trainPage.datasetRowsTotal, test: testPage.datasetRowsTotal },
+    sampledOffsets: { train: trainPage.sampleOffsets, test: testPage.sampleOffsets },
     scannedRows: { train: trainPage.scannedRows, test: testPage.scannedRows },
     acceptedExamples: allExamples.length, splits: manifest.splits,
   }, null, 2));

@@ -28,7 +28,7 @@ jobs:
       - run: npm run check
       - run: npm test
       - name: Acquire a bounded, source-filtered Smol-SmolTalk sample
-        run: npm run acquire:smol-smoltalk -- --max-train-rows 1200 --max-test-rows 200 --output artifacts/smol-smoltalk
+        run: npm run acquire:smol-smoltalk -- --max-train-rows 5000 --max-test-rows 1000 --output artifacts/smol-smoltalk
       - name: Validate explicit train, validation and test splits
         run: |
           npm run prepare:dataset:source-splits -- \

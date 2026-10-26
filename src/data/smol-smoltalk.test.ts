@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { prepareSmolRow, SMOL_MAGPIE_SOURCE } from "./smol-smoltalk.js";
+import { prepareSmolRow, sampledPageOffsets, SMOL_MAGPIE_SOURCE } from "./smol-smoltalk.js";
 
 function row(row_idx: number, source = SMOL_MAGPIE_SOURCE, messages = [
   { role: "user", content: "Can you explain how rainbows form in the sky?" },
@@ -8,6 +8,18 @@ function row(row_idx: number, source = SMOL_MAGPIE_SOURCE, messages = [
 ]) {
   return { row_idx, row: { source, messages } };
 }
+
+test("sampled page offsets are deterministic, distributed, and respect the row budget", () => {
+  const offsets = sampledPageOffsets(460_000, 1_200, 100);
+  assert.equal(offsets.length, 12);
+  assert.equal(offsets[0], 0);
+  assert.equal(offsets.at(-1), 459_900);
+  assert.ok(offsets.every((offset) => Number.isSafeInteger(offset) && offset >= 0 && offset + 100 <= 460_000));
+  assert.ok(offsets.every((offset, index) => index === 0 || offset > offsets[index - 1]!));
+  assert.deepEqual(sampledPageOffsets(460_000, 1_200, 100), offsets);
+  assert.deepEqual(sampledPageOffsets(0, 1_200, 100), []);
+  assert.deepEqual(sampledPageOffsets(50, 200, 100), [0]);
+});
 
 test("Smol adapter accepts only the selected source and supported single-turn roles", () => {
   assert.ok(prepareSmolRow(row(12), "train"));

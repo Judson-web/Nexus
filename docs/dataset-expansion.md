@@ -20,7 +20,7 @@
 A bounded adapter is available for `HuggingFaceTB/smol-smoltalk`:
 
 ```sh
-npm run acquire:smol-smoltalk -- --max-train-rows 1200 --max-test-rows 200 --output artifacts/smol-smoltalk
+npm run acquire:smol-smoltalk -- --max-train-rows 5000 --max-test-rows 1000 --output artifacts/smol-smoltalk
 npm run prepare:dataset:source-splits -- \
   --train artifacts/smol-smoltalk/train.txt \
   --validation artifacts/smol-smoltalk/validation.txt \

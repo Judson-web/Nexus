@@ -98,3 +98,21 @@ export function prepareSmolRow(
 
   return { id, contentSha256, rowIndex, sourceSplit, split, source: SMOL_MAGPIE_SOURCE, text };
 }
+
+/**
+ * Select deterministic page starts across an official split while inspecting
+ * no more than maxRows rows. Spreading sample windows avoids bias toward rows
+ * at the beginning of a source-concatenated dataset.
+ */
+export function sampledPageOffsets(totalRows: number, maxRows: number, pageSize = 100): number[] {
+  if (!Number.isSafeInteger(totalRows) || totalRows < 0) throw new RangeError("totalRows must be a non-negative integer.");
+  if (!Number.isSafeInteger(maxRows) || maxRows < 1) throw new RangeError("maxRows must be a positive integer.");
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new RangeError("pageSize must be an integer between 1 and 100.");
+  if (totalRows === 0) return [];
+  const pageCount = Math.min(Math.ceil(maxRows / pageSize), Math.ceil(totalRows / pageSize));
+  const lastOffset = Math.max(0, totalRows - Math.min(pageSize, maxRows));
+  if (pageCount <= 1) return [0];
+  return [...new Set(Array.from({ length: pageCount }, (_, index) =>
+    Math.min(lastOffset, Math.floor(index * lastOffset / (pageCount - 1))),
+  ))].sort((a, b) => a - b);
+}
