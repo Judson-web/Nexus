@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 export const SMOL_SMOLTALK_DATASET = "HuggingFaceTB/smol-smoltalk";
-export const SMOL_SMOLTALK_REVISION = "f80219b491a28e79600fa320e075752f1ea0303e";
+export const SMOL_SMOLTALK_REVISION = "f73fe857d519ff6ac5af2ea67c4d3834da7b8bcc";
 export const SMOL_SMOLTALK_LICENSE = "apache-2.0";
 export const SMOL_MAGPIE_SOURCE = "smol-magpie-ultra-short";
 

@@ -32,7 +32,7 @@ npm run prepare:dataset:source-splits -- \
   --output artifacts/smol-smoltalk-manifest.json
 ```
 
-The acquisition script verifies the pinned Hub revision and Apache-2.0 card license before and after retrieval, queries the Dataset Viewer filter endpoint in bounded pages, and accepts only the exact `smol-magpie-ultra-short` source label. It preserves the upstream test split and derives a deterministic validation partition from the selected training rows. The upstream license and a citation are included with the artifact.
+The acquisition script pins revision `f73fe857d519ff6ac5af2ea67c4d3834da7b8bcc` and verifies the Hub revision and Apache-2.0 card license before and after retrieval. It queries the Dataset Viewer filter endpoint in bounded pages and accepts only the exact `smol-magpie-ultra-short` source label. It preserves the upstream test split and derives a deterministic validation partition from the selected training rows. The upstream license and a citation are included with the artifact.
 
 Do not remove the source filter or point this adapter at the `all` SmolTalk mix. Other source labels include datasets with separate license terms. The adapter is intentionally conservative: only a single-turn user/assistant pair with an optional system instruction is accepted, obvious PII-like values are dropped, mixed-role conversations are excluded, and cross-split exact duplicates cause a hard failure.
 
