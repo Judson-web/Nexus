@@ -44,6 +44,7 @@ function boundedInt(options: Map<string, string>, key: string, fallback: number,
 async function fetchBytes(url: URL): Promise<Uint8Array> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
+    let retryWaitMs = 1000 * 2 ** attempt;
     try {
       const response = await fetch(url, {
         headers: { "user-agent": USER_AGENT },
@@ -59,11 +60,17 @@ async function fetchBytes(url: URL): Promise<Uint8Array> {
       }
       const detail = (await response.text()).slice(0, 400).replace(/\s+/gu, " ").trim();
       lastError = new Error(`HTTP ${response.status} from ${url.hostname}${url.pathname}${detail ? `: ${detail}` : ""}`);
+      if (response.status === 429) {
+        const retryAfter = Number(response.headers.get("retry-after"));
+        retryWaitMs = Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(60_000, retryAfter * 1000)
+          : Math.min(30_000, 5000 * 2 ** attempt);
+      }
       if (response.status < 500 && response.status !== 429) break;
     } catch (error) {
       lastError = error;
     }
-    if (attempt < 3) await delay(1000 * 2 ** attempt);
+    if (attempt < 3) await delay(retryWaitMs);
   }
   throw new Error(`Request failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
@@ -109,10 +116,11 @@ async function fetchPage(split: SmolSourceSplit, offset: number, length: number)
   return parsed;
 }
 
-async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ examples: SmolPreparedExample[]; scannedRows: number; datasetRowsTotal: number; sampleOffsets: number[] }> {
+async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ examples: SmolPreparedExample[]; scannedRows: number; datasetRowsTotal: number; sampleOffsets: number[]; sourceLabelCounts: Record<string, number> }> {
   const examples: SmolPreparedExample[] = [];
   let scannedRows = 0;
   const seenContent = new Map<string, SmolPreparedSplit>();
+  const sourceLabelCounts: Record<string, number> = {};
   const metadata = await fetchPage(split, 0, 1);
   const datasetRowsTotal = metadata.num_rows_total!;
   // Distribute a strict row budget across the entire official split instead of
@@ -130,6 +138,10 @@ async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ e
       if (seenRowIds.has(item.row_idx)) continue;
       seenRowIds.add(item.row_idx);
       scannedRows += 1;
+      const sourceLabel = item.row && typeof item.row === "object" && typeof (item.row as { source?: unknown }).source === "string"
+        ? (item.row as { source: string }).source
+        : "<missing-source>";
+      sourceLabelCounts[sourceLabel] = (sourceLabelCounts[sourceLabel] ?? 0) + 1;
       const prepared = prepareSmolRow({ row_idx: item.row_idx, row: item.row }, split);
       if (!prepared) continue;
       const previousSplit = seenContent.get(prepared.contentSha256);
@@ -141,7 +153,7 @@ async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ e
       examples.push(prepared);
     }
   }
-  return { examples, scannedRows, datasetRowsTotal, sampleOffsets };
+  return { examples, scannedRows, datasetRowsTotal, sampleOffsets, sourceLabelCounts };
 }
 
 function textBySplit(examples: readonly SmolPreparedExample[]): Record<SmolPreparedSplit, string[]> {
@@ -152,8 +164,8 @@ function textBySplit(examples: readonly SmolPreparedExample[]): Record<SmolPrepa
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
-  const maxTrainRows = boundedInt(options, "max-train-rows", 1200, 100, 20_000);
-  const maxTestRows = boundedInt(options, "max-test-rows", 200, 25, 2_000);
+  const maxTrainRows = boundedInt(options, "max-train-rows", 1500, 100, 20_000);
+  const maxTestRows = boundedInt(options, "max-test-rows", 500, 25, 2_000);
   const output = options.get("output") ?? "artifacts/smol-smoltalk";
   await verifyRevision();
 
@@ -173,7 +185,7 @@ async function main(): Promise<void> {
 
   const splitTexts = textBySplit(allExamples);
   if (splitTexts.train.length < 50 || splitTexts.validation.length < 10 || splitTexts.test.length < 10) {
-    throw new Error(`Insufficient usable source examples after filtering: train=${splitTexts.train.length}, validation=${splitTexts.validation.length}, test=${splitTexts.test.length}.`);
+    throw new Error(`Insufficient usable source examples after filtering: train=${splitTexts.train.length}, validation=${splitTexts.validation.length}, test=${splitTexts.test.length}. Source labels observed: train=${JSON.stringify(trainPage.sourceLabelCounts)}, test=${JSON.stringify(testPage.sourceLabelCounts)}.`);
   }
 
   await verifyRevision();
@@ -201,7 +213,7 @@ async function main(): Promise<void> {
     retrievalMethod: "Hugging Face Dataset Viewer /rows API at default config with a bounded scan and exact source-label allowlist applied locally",
     filter: { source: SMOL_MAGPIE_SOURCE, licenseScope: "only the source label for the Apache-2.0 Smol-Magpie-Ultra-derived subset; no mixed-source rows accepted" },
     caps: { maxTrainRowsScanned: maxTrainRows, maxTestRowsScanned: maxTestRows },
-    rows: { trainDatasetRowsTotal: trainPage.datasetRowsTotal, testDatasetRowsTotal: testPage.datasetRowsTotal, trainScanned: trainPage.scannedRows, testScanned: testPage.scannedRows, trainSampleOffsets: trainPage.sampleOffsets, testSampleOffsets: testPage.sampleOffsets },
+    rows: { trainDatasetRowsTotal: trainPage.datasetRowsTotal, testDatasetRowsTotal: testPage.datasetRowsTotal, trainScanned: trainPage.scannedRows, testScanned: testPage.scannedRows, trainSampleOffsets: trainPage.sampleOffsets, testSampleOffsets: testPage.sampleOffsets, trainSourceLabelCounts: trainPage.sourceLabelCounts, testSourceLabelCounts: testPage.sourceLabelCounts },
     acceptedExamples: allExamples.length,
     splits: Object.fromEntries(Object.entries(splitTexts).map(([split, examples]) => [split, examples.length])),
     sourceFileSha256: { train: sha256(trainPage.examples.map((item) => `${item.rowIndex}:${item.contentSha256}`).join("\n")), test: sha256(testPage.examples.map((item) => `${item.rowIndex}:${item.contentSha256}`).join("\n")) },
@@ -241,6 +253,7 @@ async function main(): Promise<void> {
     source: SMOL_MAGPIE_SOURCE, license: SMOL_SMOLTALK_LICENSE,
     datasetRowsTotal: { train: trainPage.datasetRowsTotal, test: testPage.datasetRowsTotal },
     sampledOffsets: { train: trainPage.sampleOffsets, test: testPage.sampleOffsets },
+    sourceLabelCounts: { train: trainPage.sourceLabelCounts, test: testPage.sourceLabelCounts },
     scannedRows: { train: trainPage.scannedRows, test: testPage.scannedRows },
     acceptedExamples: allExamples.length, splits: manifest.splits,
   }, null, 2));
