@@ -57,7 +57,8 @@ export function resolveChatProvider(
   const basePath = parsed.pathname || "";
   const endpoint = `${parsed.origin}${basePath}/chat/completions`;
   const configuredModel = env.NEXUS_LLM_MODEL?.trim();
-  const model = configuredModel || (isHuggingFace ? DEFAULT_HUGGING_FACE_MODEL : "local-model");
+  const model = configuredModel || (isHuggingFace ? DEFAULT_HUGGING_FACE_MODEL : "");
+  if (!model) throw new Error("NEXUS_LLM_MODEL is required when NEXUS_LLM_BASE_URL is configured.");
   if (model.length > 200 || /[\r\n]/u.test(model)) {
     throw new Error("NEXUS_LLM_MODEL must be a model identifier no longer than 200 characters.");
   }
