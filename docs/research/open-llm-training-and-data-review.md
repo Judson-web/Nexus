@@ -58,6 +58,10 @@ Review date: 2026-10-26
 - `HuggingFaceH4/no_robots`: the official card declares CC-BY-NC-4.0. Exclude from a project that may be used commercially unless the project deliberately accepts a non-commercial restriction.
 - `Open-Orca/OpenOrca`, the `all` SmolTalk mixtures, and mixed-source OpenHermes derivatives: constituents have differing or unclear source terms. Review source-level records rather than assuming the wrapper repository's license overrides upstream terms.
 
+## Inference-format contract
+
+Manifest-trained checkpoints record their serving format in the checksum-covered checkpoint JSON. Chat-SFT checkpoints use `nexus-chat-sft-v1`; the CLI and local API wrap a plain user prompt as `User: … Assistant: ` and return only the newly generated continuation. Older checkpoints without this field default to legacy causal-language-model behavior. The format tag is validated at verified load time rather than being inferred from prompt strings at runtime.
+
 ## Training objective change
 
 Nexus previously serialized conversations as `User: … Assistant: …` but applied next-token loss to the entire sequence. That spent scarce CPU gradient work teaching the model to predict the user prompt as well as the answer. The trainer now encodes prompt context separately and applies loss only to assistant continuation tokens and EOS for user/assistant pairs. Plain-text examples keep the normal full-sequence next-token objective.

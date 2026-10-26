@@ -207,7 +207,14 @@ async function main(): Promise<void> {
     testUsedForModelSelection: false,
   };
 
-  const checkpointContent = JSON.stringify({ ...model.toCheckpoint(), tokenizer: tokenizer.toJSON() }, null, 2) + "\n";
+  const hasAssistantSftExamples = trainingExamples.some((example) =>
+    encodeTrainingExample(example.text, tokenizer, config.contextSize, maxTokensPerExample).lossPolicy === "assistant-only-for-user-assistant-pairs-v1");
+  const trainingFormat = hasAssistantSftExamples ? "nexus-chat-sft-v1" as const : "nexus-causal-lm-v1" as const;
+  const checkpointContent = JSON.stringify({
+    ...model.toCheckpoint(),
+    tokenizer: tokenizer.toJSON(),
+    trainingFormat,
+  }, null, 2) + "\n";
   const checkpointBytes = Buffer.from(checkpointContent, "utf8");
   const checkpointSha256 = createHash("sha256").update(checkpointBytes).digest("hex");
   const provenance = {
@@ -226,6 +233,7 @@ async function main(): Promise<void> {
     },
     training: {
       seed, epochsPerExample: epochs, learningRate, optimizer, schedule, weightDecay,
+      trainingFormat,
       lossPolicy: "assistant-only-for-user-assistant-pairs-v1",
       tokenizer: { type: "train-only byte-pair", merges: tokenizer.toJSON().merges.length, vocabSize: tokenizer.vocabSize },
       trainedExamples: trainingExamples.length,
@@ -236,7 +244,7 @@ async function main(): Promise<void> {
       meanFinalTrainingLoss: weightedLoss / trainedTokens,
       lastGradientNorm, lastGradientScale,
     },
-    model: modelConfig,
+    model: { ...modelConfig, trainingFormat },
     heldOutEvaluation,
     warning: "Research checkpoint only. Held-out metrics are diagnostics, not proof of general language ability. Do not tune hyperparameters against test results.",
   };

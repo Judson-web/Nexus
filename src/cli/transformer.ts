@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { ByteTokenizer } from "../tokenizer/byte-tokenizer.js";
 import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
 import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel } from "../model/transformer-model.js";
+import { formatChatSftPrompt, NEXUS_CHAT_SFT_FORMAT } from "../chat/prompt-format.js";
 
 function optionsFromArgs(args: string[]): Map<string, string> {
   const options = new Map<string, string>();
@@ -64,8 +65,12 @@ async function main(): Promise<void> {
       throw new Error("Checkpoint tokenizer vocabulary does not match model configuration.");
     }
     const prompt = required(options, "prompt");
-    const generated = model.generate(generationTokenizer.encode(prompt, false), numeric(options, "tokens", 80));
-    console.log(generationTokenizer.decode(generated));
+    const isChatSft = checkpoint.trainingFormat === NEXUS_CHAT_SFT_FORMAT;
+    const modelPrompt = isChatSft ? formatChatSftPrompt(prompt) : prompt;
+    const promptTokens = generationTokenizer.encode(modelPrompt, false);
+    const generated = model.generate(promptTokens, numeric(options, "tokens", 80));
+    const outputTokens = isChatSft ? generated.slice(promptTokens.length) : generated;
+    console.log(generationTokenizer.decode(outputTokens).trim());
     return;
   }
 

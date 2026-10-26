@@ -72,26 +72,25 @@ jobs:
           set -euo pipefail
           npx tsx src/cli/transformer.ts generate \
             --checkpoint artifacts/smol-smoltalk-experiment/transformer.json \
-            --prompt "User: Explain photosynthesis in simple terms. Assistant: " --tokens 80 \
+            --prompt "Explain photosynthesis in simple terms." --tokens 80 \
             > artifacts/smol-smoltalk-experiment/sample-photosynthesis.txt
           npx tsx src/cli/transformer.ts generate \
             --checkpoint artifacts/smol-smoltalk-experiment/transformer.json \
-            --prompt "User: Give two tips for studying biology. Assistant: " --tokens 80 \
+            --prompt "Give two tips for studying biology." --tokens 80 \
             > artifacts/smol-smoltalk-experiment/sample-study-tips.txt
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
             const samples = [
-              { prompt: "User: Explain photosynthesis in simple terms. Assistant: ", path: "artifacts/smol-smoltalk-experiment/sample-photosynthesis.txt" },
-              { prompt: "User: Give two tips for studying biology. Assistant: ", path: "artifacts/smol-smoltalk-experiment/sample-study-tips.txt" }
+              { prompt: "Explain photosynthesis in simple terms.", path: "artifacts/smol-smoltalk-experiment/sample-photosynthesis.txt" },
+              { prompt: "Give two tips for studying biology.", path: "artifacts/smol-smoltalk-experiment/sample-study-tips.txt" }
             ].map(({ prompt, path }) => {
               const text = readFileSync(path, "utf8").trim();
-              const continuation = text.startsWith(prompt) ? text.slice(prompt.length).trim() : "";
+              const continuation = text;
               return {
                 prompt,
                 continuationCharacters: continuation.length,
-                promptPreserved: text.startsWith(prompt),
                 continuationPresent: continuation.length > 0,
-                sample: text
+                sample: continuation
               };
             });
             const summary = {
@@ -100,7 +99,7 @@ jobs:
               trainingExamples: 200,
               validationExamples: 12,
               testExamples: 24,
-              sampleChecksPassed: samples.every(sample => sample.promptPreserved && sample.continuationPresent),
+              sampleChecksPassed: samples.every(sample => sample.continuationPresent),
               samples
             };
             writeFileSync("artifacts/smol-smoltalk-experiment/generation-summary.json", JSON.stringify(summary, null, 2) + "\n");

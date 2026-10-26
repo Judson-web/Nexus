@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
 import { loadVerifiedTransformerArtifact, type TransformerTokenizer } from "../../../src/model/verified-transformer-artifact.js";
-import type { TransformerModel } from "../../../src/model/transformer-model.js";
+import type { TransformerModel, TransformerTrainingFormat } from "../../../src/model/transformer-model.js";
+import { formatChatSftPrompt, NEXUS_CHAT_SFT_FORMAT } from "../../../src/chat/prompt-format.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 10;
 
 const MAX_BODY_BYTES = 4096;
-let cachedTransformer: Promise<{ model: TransformerModel; tokenizer: TransformerTokenizer; sha256: string }> | undefined;
+let cachedTransformer: Promise<{ model: TransformerModel; tokenizer: TransformerTokenizer; sha256: string; trainingFormat: TransformerTrainingFormat }> | undefined;
 
-async function getConfiguredTransformer(): Promise<{ model: TransformerModel; tokenizer: TransformerTokenizer; sha256: string } | undefined> {
+async function getConfiguredTransformer(): Promise<{ model: TransformerModel; tokenizer: TransformerTokenizer; sha256: string; trainingFormat: TransformerTrainingFormat } | undefined> {
   const checkpointPath = process.env.NEXUS_TRANSFORMER_CHECKPOINT?.trim();
   if (!checkpointPath) return undefined;
   if (!cachedTransformer) {
-    cachedTransformer = loadVerifiedTransformerArtifact(checkpointPath).then(({ model, tokenizer, sha256 }) => ({ model, tokenizer, sha256 }));
+    cachedTransformer = loadVerifiedTransformerArtifact(checkpointPath).then(({ model, tokenizer, sha256, trainingFormat }) => ({ model, tokenizer, sha256, trainingFormat }));
   }
   return cachedTransformer;
 }
@@ -79,12 +80,19 @@ export async function POST(request: Request) {
   try {
     const transformer = await getConfiguredTransformer();
     if (transformer) {
-      const generated = transformer.model.generate(transformer.tokenizer.encode(prompt, false), maxTokens);
+      const isChatSft = transformer.trainingFormat === NEXUS_CHAT_SFT_FORMAT;
+      const modelPrompt = isChatSft ? formatChatSftPrompt(prompt) : prompt;
+      const promptTokens = transformer.tokenizer.encode(modelPrompt, false);
+      const generated = transformer.model.generate(promptTokens, maxTokens);
+      const outputTokens = isChatSft ? generated.slice(promptTokens.length) : generated;
       return NextResponse.json({
-        text: transformer.tokenizer.decode(generated).slice(0, 1200),
+        text: transformer.tokenizer.decode(outputTokens).trim().slice(0, 1200),
         model: "Nexus Transformer (research checkpoint)",
+        trainingFormat: transformer.trainingFormat,
         modelSha256: transformer.sha256,
-        note: "Experimental self-trained Transformer. Checkpoint checksum verified at load; output quality depends on training data and evaluation.",
+        note: isChatSft
+          ? "Experimental self-trained Transformer. Assistant prompt format inferred from checksum-verified checkpoint metadata; output quality remains experimental."
+          : "Experimental self-trained Transformer. Checkpoint checksum verified at load; output quality depends on training data and evaluation.",
       }, { headers: { "Cache-Control": "no-store" } });
     }
     return NextResponse.json({
