@@ -28,7 +28,8 @@
     "train:sweep": "tsx src/cli/train-sweep.ts",
     "acquire:common-pile": "tsx src/cli/acquire-common-pile.ts",
     "audit:tokenizer": "tsx src/cli/audit-tokenizer.ts",
-    "acquire:oasst1": "tsx src/cli/acquire-oasst1.ts"
+    "acquire:oasst1": "tsx src/cli/acquire-oasst1.ts",
+    "acquire:smol-smoltalk": "tsx src/cli/acquire-smol-smoltalk.ts"
   },
   "dependencies": {
     "next": "^15.5.0",
