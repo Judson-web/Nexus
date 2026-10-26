@@ -40,6 +40,73 @@ jobs:
             --license "Apache-2.0" \
             --attribution "Hugging Face Smol Models Research, Smol-SmolTalk / Smol-Magpie-Ultra; arXiv:2502.02737" \
             --output artifacts/smol-smoltalk-manifest.json
+      - name: Create a deterministic capped SFT experiment split
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/smol-smoltalk-experiment/input
+          test "$(wc -l < artifacts/smol-smoltalk/train.txt)" -ge 200
+          test "$(wc -l < artifacts/smol-smoltalk/validation.txt)" -ge 12
+          test "$(wc -l < artifacts/smol-smoltalk/test.txt)" -ge 24
+          head -n 200 artifacts/smol-smoltalk/train.txt > artifacts/smol-smoltalk-experiment/input/train.txt
+          head -n 12 artifacts/smol-smoltalk/validation.txt > artifacts/smol-smoltalk-experiment/input/validation.txt
+          head -n 24 artifacts/smol-smoltalk/test.txt > artifacts/smol-smoltalk-experiment/input/test.txt
+          npm run prepare:dataset:source-splits -- \
+            --train artifacts/smol-smoltalk-experiment/input/train.txt \
+            --validation artifacts/smol-smoltalk-experiment/input/validation.txt \
+            --test artifacts/smol-smoltalk-experiment/input/test.txt \
+            --source-name "HuggingFaceTB/smol-smoltalk:smol-magpie-ultra-short:bounded-experiment" \
+            --source-url "https://huggingface.co/datasets/HuggingFaceTB/smol-smoltalk" \
+            --license "Apache-2.0" \
+            --attribution "Hugging Face Smol Models Research, Smol-SmolTalk / Smol-Magpie-Ultra; arXiv:2502.02737" \
+            --output artifacts/smol-smoltalk-experiment/manifest.json
+      - name: Train bounded from-scratch SFT research model
+        run: |
+          npm run train:transformer:manifest -- \
+            --manifest artifacts/smol-smoltalk-experiment/manifest.json \
+            --output artifacts/smol-smoltalk-experiment/transformer.json \
+            --epochs 1 --seed 44 --learning-rate 0.0001 \
+            --context-size 16 --embedding-size 4 --heads 2 --feed-forward-size 8 --layer-count 1 \
+            --max-minutes 10 --max-tokens-per-example 96 --target-stride 8
+      - name: Generate assistant-format samples from the SFT experiment
+        run: |
+          set -euo pipefail
+          npx tsx src/cli/transformer.ts generate \
+            --checkpoint artifacts/smol-smoltalk-experiment/transformer.json \
+            --prompt "User: Explain photosynthesis in simple terms. Assistant: " --tokens 80 \
+            > artifacts/smol-smoltalk-experiment/sample-photosynthesis.txt
+          npx tsx src/cli/transformer.ts generate \
+            --checkpoint artifacts/smol-smoltalk-experiment/transformer.json \
+            --prompt "User: Give two tips for studying biology. Assistant: " --tokens 80 \
+            > artifacts/smol-smoltalk-experiment/sample-study-tips.txt
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const samples = [
+              { prompt: "User: Explain photosynthesis in simple terms. Assistant: ", path: "artifacts/smol-smoltalk-experiment/sample-photosynthesis.txt" },
+              { prompt: "User: Give two tips for studying biology. Assistant: ", path: "artifacts/smol-smoltalk-experiment/sample-study-tips.txt" }
+            ].map(({ prompt, path }) => {
+              const text = readFileSync(path, "utf8").trim();
+              const continuation = text.startsWith(prompt) ? text.slice(prompt.length).trim() : "";
+              return {
+                prompt,
+                continuationCharacters: continuation.length,
+                promptPreserved: text.startsWith(prompt),
+                continuationPresent: continuation.length > 0,
+                sample: text
+              };
+            });
+            const summary = {
+              note: "Tiny from-scratch CPU SFT experiment only. Inspect actual samples; automatic checks do not establish useful conversational ability.",
+              model: "Nexus Transformer, from-scratch",
+              trainingExamples: 200,
+              validationExamples: 12,
+              testExamples: 24,
+              sampleChecksPassed: samples.every(sample => sample.promptPreserved && sample.continuationPresent),
+              samples
+            };
+            writeFileSync("artifacts/smol-smoltalk-experiment/generation-summary.json", JSON.stringify(summary, null, 2) + "\n");
+            if (!summary.sampleChecksPassed) process.exit(1);
+            console.log(JSON.stringify({ sampleChecksPassed: summary.sampleChecksPassed, continuations: samples.map(({prompt, continuationCharacters})=>({prompt,continuationCharacters})) }, null, 2));
+          '
       - name: Upload dataset manifest and license-preserving sample
         if: always()
         uses: actions/upload-artifact@v4
@@ -48,5 +115,6 @@ jobs:
           path: |
             artifacts/smol-smoltalk/
             artifacts/smol-smoltalk-manifest.json
+            artifacts/smol-smoltalk-experiment/
           if-no-files-found: warn
           retention-days: 14
