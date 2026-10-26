@@ -44,12 +44,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts/smol-smoltalk-experiment/input
-          test "$(wc -l < artifacts/smol-smoltalk/train.txt)" -ge 200
-          test "$(wc -l < artifacts/smol-smoltalk/validation.txt)" -ge 12
-          test "$(wc -l < artifacts/smol-smoltalk/test.txt)" -ge 24
-          head -n 200 artifacts/smol-smoltalk/train.txt > artifacts/smol-smoltalk-experiment/input/train.txt
-          head -n 12 artifacts/smol-smoltalk/validation.txt > artifacts/smol-smoltalk-experiment/input/validation.txt
-          head -n 24 artifacts/smol-smoltalk/test.txt > artifacts/smol-smoltalk-experiment/input/test.txt
+          test "$(wc -l < artifacts/smol-smoltalk/train.txt)" -ge 500
+          test "$(wc -l < artifacts/smol-smoltalk/validation.txt)" -ge 20
+          test "$(wc -l < artifacts/smol-smoltalk/test.txt)" -ge 32
+          head -n 500 artifacts/smol-smoltalk/train.txt > artifacts/smol-smoltalk-experiment/input/train.txt
+          head -n 20 artifacts/smol-smoltalk/validation.txt > artifacts/smol-smoltalk-experiment/input/validation.txt
+          head -n 32 artifacts/smol-smoltalk/test.txt > artifacts/smol-smoltalk-experiment/input/test.txt
           npm run prepare:dataset:source-splits -- \
             --train artifacts/smol-smoltalk-experiment/input/train.txt \
             --validation artifacts/smol-smoltalk-experiment/input/validation.txt \
@@ -64,9 +64,9 @@ jobs:
           npm run train:transformer:manifest -- \
             --manifest artifacts/smol-smoltalk-experiment/manifest.json \
             --output artifacts/smol-smoltalk-experiment/transformer.json \
-            --epochs 1 --seed 44 --learning-rate 0.0001 \
+            --epochs 1 --seed 44 --learning-rate 0.001 --schedule constant \
             --context-size 16 --embedding-size 4 --heads 2 --feed-forward-size 8 --layer-count 1 \
-            --max-minutes 10 --max-tokens-per-example 96 --target-stride 8
+            --max-minutes 10 --max-tokens-per-example 96 --target-stride 4
       - name: Generate assistant-format samples from the SFT experiment
         run: |
           set -euo pipefail
@@ -96,9 +96,9 @@ jobs:
             const summary = {
               note: "Tiny from-scratch CPU SFT experiment only. Inspect actual samples; automatic checks do not establish useful conversational ability.",
               model: "Nexus Transformer, from-scratch",
-              trainingExamples: 200,
-              validationExamples: 12,
-              testExamples: 24,
+              trainingExamples: 500,
+              validationExamples: 20,
+              testExamples: 32,
               sampleChecksPassed: samples.every(sample => sample.continuationPresent),
               samples
             };
