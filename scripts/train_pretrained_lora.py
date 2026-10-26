@@ -138,7 +138,9 @@ def fit_prompt_completion(tokenizer: Any, messages: list[dict[str, str]], max_le
     prompt = [dict(message) for message in messages[:-1]]
     if not prompt or prompt[-1]["role"] != "user":
         return None
-    target_length = chat_token_length(tokenizer, [completion])
+    # Measuring assistant content without a chat wrapper works across model
+    # templates that reject a conversation beginning with an assistant turn.
+    target_length = len(tokenizer.encode(completion["content"], add_special_tokens=False)) + 8
     if target_length > max_length - 32:
         return None
 
