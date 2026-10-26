@@ -39,6 +39,10 @@ export function resolveChatProvider(
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     throw new Error("NEXUS_LLM_BASE_URL must use HTTP or HTTPS.");
   }
+  const isLoopback = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]";
+  if (parsed.protocol === "http:" && !isLoopback) {
+    throw new Error("NEXUS_LLM_BASE_URL must use HTTPS except for loopback development endpoints.");
+  }
   if (parsed.username || parsed.password || parsed.search || parsed.hash) {
     throw new Error("NEXUS_LLM_BASE_URL must not contain credentials, query parameters, or a fragment.");
   }
