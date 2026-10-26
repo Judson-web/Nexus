@@ -21,7 +21,21 @@ test("sampled page offsets are deterministic, distributed, and respect the row b
   assert.deepEqual(sampledPageOffsets(50, 200, 100), [0]);
 });
 
-test("Smol adapter accepts only the selected source and supported single-turn roles", () => {
+test("Smol adapter accepts multi-turn conversation histories and preserves the last assistant turn", () => {
+  const prepared = prepareSmolRow(row(19, SMOL_MAGPIE_SOURCE, [
+    { role: "user", content: "I need a simple explanation of photosynthesis." },
+    { role: "assistant", content: "Plants use sunlight to make sugars from water and carbon dioxide." },
+    { role: "user", content: "What does chlorophyll do?" },
+    { role: "assistant", content: "Chlorophyll absorbs light energy so photosynthesis can occur." },
+  ]), "train");
+  assert.ok(prepared);
+  assert.match(prepared.text, /User: I need a simple explanation/);
+  assert.match(prepared.text, /Assistant: Plants use sunlight/);
+  assert.match(prepared.text, /User: What does chlorophyll do/);
+  assert.match(prepared.text, /Assistant: Chlorophyll absorbs light energy/);
+});
+
+test("Smol adapter accepts only the selected source and supported conversation roles", () => {
   assert.ok(prepareSmolRow(row(12), "train"));
   assert.equal(prepareSmolRow(row(12, "openhermes-50k"), "train"), null);
   assert.equal(prepareSmolRow(row(12, SMOL_MAGPIE_SOURCE, [

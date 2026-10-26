@@ -30,7 +30,7 @@ export function encodeTrainingExample(
     throw new RangeError("maxTokens must be an integer of at least 2 so the sample can contain a context and a target.");
   }
 
-  const delimiterIndex = text.startsWith(PAIR_PREFIX) ? text.indexOf(ASSISTANT_SEPARATOR, PAIR_PREFIX.length) : -1;
+  const delimiterIndex = text.startsWith(PAIR_PREFIX) ? text.lastIndexOf(ASSISTANT_SEPARATOR) : -1;
   const responseStart = delimiterIndex < 0 ? -1 : delimiterIndex + ASSISTANT_SEPARATOR.length;
   const response = responseStart < 0 ? "" : text.slice(responseStart).trim();
   if (delimiterIndex >= 0 && response.length > 0) {

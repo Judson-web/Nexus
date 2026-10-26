@@ -51,6 +51,17 @@ test("overlong responses are truncated without adding a false end-of-turn token"
   assert.notEqual(encoded.tokens.at(-1), EOS_TOKEN_ID);
 });
 
+test("multi-turn SFT scores only the final assistant reply", () => {
+  const text = "User: Describe photosynthesis. Assistant: Plants use sunlight to produce sugars. User: What does chlorophyll do? Assistant: Chlorophyll absorbs light energy.";
+  const marker = text.lastIndexOf(" Assistant: ");
+  const prefix = text.slice(0, marker + " Assistant: ".length);
+  const response = text.slice(marker + " Assistant: ".length);
+  const encoded = encodeTrainingExample(text, tokenizer, 32);
+  assert.deepEqual(encoded.tokens.slice(0, encoded.lossStartIndex), tokenizer.encode(prefix, false));
+  assert.deepEqual(encoded.tokens.slice(encoded.lossStartIndex, -1), tokenizer.encode(response, false));
+  assert.equal(encoded.lossPolicy, "assistant-only-for-user-assistant-pairs-v1");
+});
+
 test("plain-text examples retain the full-sequence objective", () => {
   const encoded = encodeTrainingExample("ordinary pretraining text", tokenizer, 8, 32);
   assert.equal(encoded.lossStartIndex, 1);

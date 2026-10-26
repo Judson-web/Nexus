@@ -40,6 +40,7 @@ function normalizeContent(value: string): string {
 
 function textIssue(value: string, maxCharacters: number): string | null {
   const text = normalizeContent(value);
+  if (text.length === 0) return "empty-text";
   if (text.length < 12) return "text-too-short";
   if (text.length > maxCharacters) return "text-too-long";
   if (/(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/iu.test(text)) return "email-like-content";
@@ -69,7 +70,7 @@ export function prepareSmolRowWithReason(
   const row = rowRecord.row as { source?: unknown; messages?: unknown };
   if (row.source !== SMOL_MAGPIE_SOURCE) return reject("source-mismatch");
   if (!Array.isArray(row.messages)) return reject("messages-not-array");
-  if (row.messages.length !== 2 && row.messages.length !== 3) return reject("unsupported-message-count");
+  if (row.messages.length < 2 || row.messages.length > 58) return reject("unsupported-message-count");
 
   const messages: { role: string; content: string }[] = [];
   for (const item of row.messages) {
@@ -78,26 +79,52 @@ export function prepareSmolRowWithReason(
     if (typeof record.role !== "string" || typeof record.content !== "string") return reject("message-fields-missing");
     messages.push({ role: record.role.toLowerCase(), content: record.content });
   }
-  const roles = messages.map((message) => message.role);
-  const validRoles = roles.join(",") === "user,assistant" || roles.join(",") === "system,user,assistant";
-  if (!validRoles) return reject("unsupported-role-sequence:" + roles.map((role) => role.slice(0, 24)).join(","));
 
-  const system = messages.length === 3 ? normalizeContent(messages[0]!.content) : "";
-  const user = normalizeContent(messages[messages.length - 2]!.content);
-  const answer = normalizeContent(messages[messages.length - 1]!.content);
-  const userIssue = textIssue(user, 2500);
-  if (userIssue) return reject("user-" + userIssue);
-  const answerIssue = textIssue(answer, 3500);
-  if (answerIssue) return reject("assistant-" + answerIssue);
-  if (system) {
-    const systemIssue = textIssue(system, 1200);
-    if (systemIssue) return reject("system-" + systemIssue);
+  const hasSystem = messages[0]?.role === "system";
+  const system = hasSystem ? normalizeContent(messages[0]!.content) : "";
+  const turns = hasSystem ? messages.slice(1) : messages;
+  if (turns.length < 2 || turns.length % 2 !== 0) return reject("incomplete-conversation-turns");
+  for (let i = 0; i < turns.length; i++) {
+    const expected = i % 2 === 0 ? "user" : "assistant";
+    if (turns[i]!.role !== expected) {
+      const roles = messages.map((message) => message.role.slice(0, 24));
+      return reject("unsupported-role-sequence:" + roles.join(","));
+    }
   }
 
-  // Escape the prompt delimiter so the assistant-only trainer sees one boundary.
-  const prompt = [system ? "System instruction: " + system : "", system ? "User asks: " + user : user]
-    .filter(Boolean).join(" ").replace(/ Assistant: /gu, " Assistant : ");
-  const text = `User: ${prompt} Assistant: ${answer}`;
+  // Keep the full bounded conversation as context, but the SFT trainer masks
+  // loss to the final assistant response only. Short historical turns are fine;
+  // final prompt/answer need a minimum length, and all turns are PII/size checked.
+  if (system) {
+    const issue = textIssue(system, 1200);
+    if (issue && issue !== "text-too-short") return reject("system-" + issue);
+  }
+  for (let i = 0; i < turns.length; i++) {
+    const message = turns[i]!;
+    const maxCharacters = message.role === "user" ? 2500 : 3500;
+    const issue = textIssue(normalizeContent(message.content), maxCharacters);
+    if (issue && issue !== "text-too-short") return reject(message.role + "-" + issue);
+  }
+
+  const finalUser = normalizeContent(turns[turns.length - 2]!.content);
+  const finalAnswer = normalizeContent(turns[turns.length - 1]!.content);
+  const finalUserIssue = textIssue(finalUser, 2500);
+  if (finalUserIssue) return reject("final-user-" + finalUserIssue);
+  const finalAnswerIssue = textIssue(finalAnswer, 3500);
+  if (finalAnswerIssue) return reject("final-assistant-" + finalAnswerIssue);
+
+  const safeMessage = (value: string) => normalizeContent(value)
+    .replace(/ Assistant: /gu, " Assistant : ")
+    .replace(/ User: /gu, " User : ");
+  let text = system
+    ? "User: System instruction: " + safeMessage(system) + " User asks: "
+    : "User: ";
+  text += safeMessage(turns[0]!.content);
+  for (let i = 1; i < turns.length; i++) {
+    text += turns[i]!.role === "assistant"
+      ? " Assistant: " + safeMessage(turns[i]!.content)
+      : " User: " + safeMessage(turns[i]!.content);
+  }
   if (Buffer.byteLength(text, "utf8") > 6000) return reject("combined-too-large");
 
   const contentSha256 = sha256(text);

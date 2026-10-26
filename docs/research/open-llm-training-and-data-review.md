@@ -49,7 +49,7 @@ Review date: 2026-10-26
 ### Smol-SmolTalk and SmolTalk
 
 - Official cards: https://huggingface.co/datasets/HuggingFaceTB/smol-smoltalk and https://huggingface.co/datasets/HuggingFaceTB/smoltalk
-- Smol-SmolTalk is targeted at models below 1B parameters; its card reports 460,341 training rows and 24,229 test rows and declares Apache-2.0. It contains a `source` field with multiple source classes, so the entire blend must **not** be blindly treated as one license.
+- Smol-SmolTalk is targeted at models below 1B parameters; its card reports 460,341 training rows and 24,229 test rows and declares Apache-2.0. It contains a `source` field with multiple source classes, so the entire blend must **not** be blindly treated as one license. The adapter now accepts alternating user/assistant multi-turn histories with an optional leading system instruction and trains only against the final assistant reply, using earlier turns as context.
 - The SmolTalk card states that new subsets Smol-Magpie-Ultra, Smol-constraints, Smol-rewrite, and Smol-summarize are Apache-2.0, while existing public datasets keep their original licenses.
 - Follow-up ingestion should pin an immutable Hub revision and filter to the concise Smol-Magpie-Ultra source (`smol-magpie-ultra-short`) or another individually verified Apache-2.0 subset. Preserve source IDs, content hashes, source/test separation and license evidence. Do not use the `all` mixture by default.
 
