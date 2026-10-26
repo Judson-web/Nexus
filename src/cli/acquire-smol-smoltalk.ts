@@ -117,7 +117,7 @@ async function fetchPage(split: SmolSourceSplit, offset: number, length: number)
   return parsed;
 }
 
-async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ examples: SmolPreparedExample[]; scannedRows: number; datasetRowsTotal: number; sampleOffsets: number[]; sourceLabelCounts: Record<string, number> }> {
+async function collectRows(split: SmolSourceSplit, maxRows: number): Promise<{ examples: SmolPreparedExample[]; scannedRows: number; datasetRowsTotal: number; sampleOffsets: number[]; sourceLabelCounts: Record<string, number>; rejectionReasonCounts: Record<string, number> }> {
   const examples: SmolPreparedExample[] = [];
   let scannedRows = 0;
   const seenContent = new Map<string, SmolPreparedSplit>();
