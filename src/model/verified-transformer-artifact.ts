@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
 import { ByteTokenizer } from "../tokenizer/byte-tokenizer.js";
-import { TransformerModel, type TransformerCheckpoint } from "./transformer-model.js";
+import { TransformerModel, type TransformerCheckpoint, type TransformerTrainingFormat } from "./transformer-model.js";
 
 const MAX_CHECKPOINT_BYTES = 50 * 1024 * 1024;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -14,6 +14,7 @@ export interface VerifiedTransformerArtifact {
   readonly tokenizer: TransformerTokenizer;
   readonly sha256: string;
   readonly bytes: number;
+  readonly trainingFormat: TransformerTrainingFormat;
 }
 
 /**
@@ -59,6 +60,10 @@ export async function loadVerifiedTransformerArtifact(
   }
 
   const checkpoint = parsed as TransformerCheckpoint;
+  const trainingFormat = checkpoint.trainingFormat ?? "nexus-causal-lm-v1";
+  if (trainingFormat !== "nexus-chat-sft-v1" && trainingFormat !== "nexus-causal-lm-v1") {
+    throw new Error("Transformer checkpoint declares an unsupported training format.");
+  }
   const model = TransformerModel.fromCheckpoint(checkpoint);
   let tokenizer: TransformerTokenizer;
   if (checkpoint.tokenizer !== undefined) {
@@ -69,5 +74,5 @@ export async function loadVerifiedTransformerArtifact(
   if (model.config.vocabSize !== ("vocabSize" in tokenizer ? tokenizer.vocabSize : 257)) {
     throw new Error("Checkpoint model vocabulary does not match its embedded tokenizer.");
   }
-  return { model, tokenizer, sha256: actualSha256, bytes: bytes.byteLength };
+  return { model, tokenizer, sha256: actualSha256, bytes: bytes.byteLength, trainingFormat };
 }

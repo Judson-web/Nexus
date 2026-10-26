@@ -9,7 +9,7 @@
     "build": "next build",
     "start": "next start",
     "check": "tsc --noEmit",
-    "test": "tsx --test src/model/*.test.ts src/tokenizer/*.test.ts src/training/*.test.ts src/evaluation/*.test.ts src/data/*.test.ts",
+    "test": "tsx --test src/model/*.test.ts src/tokenizer/*.test.ts src/training/*.test.ts src/evaluation/*.test.ts src/data/*.test.ts src/chat/*.test.ts",
     "train": "tsx src/cli.ts train",
     "generate": "tsx src/cli.ts generate",
     "train:context": "tsx src/cli/context.ts train",

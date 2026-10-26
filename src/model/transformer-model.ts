@@ -13,6 +13,8 @@ export interface TransformerConfig {
   readonly seed: number;
 }
 
+export type TransformerTrainingFormat = "nexus-chat-sft-v1" | "nexus-causal-lm-v1";
+
 export interface TransformerCheckpoint {
   readonly format: "nexus-transformer";
   readonly version: 1 | 2;
@@ -20,6 +22,8 @@ export interface TransformerCheckpoint {
   readonly weights: number[];
   readonly optimizerState?: { readonly step: number; readonly firstMoment: number[]; readonly secondMoment: number[] };
   readonly tokenizer?: BytePairTokenizerData;
+  /** Inference prompt contract for manifest-trained checkpoints. */
+  readonly trainingFormat?: TransformerTrainingFormat;
 }
 
 export type TransformerOptimizer = "sgd" | "adam" | "adamw";
