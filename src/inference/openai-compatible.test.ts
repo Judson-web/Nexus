@@ -20,12 +20,13 @@ test("uses the Hugging Face OpenAI-compatible router and an open-weight instruct
 test("supports self-hosted OpenAI-compatible endpoints and never leaks the HF token to them", () => {
   const config = resolveChatProvider({
     NEXUS_LLM_BASE_URL: "http://127.0.0.1:8080/v1/",
+    NEXUS_LLM_MODEL: "my-local-instruct-model",
     HF_TOKEN: "must-not-be-forwarded",
   });
   assert.ok(config);
   assert.equal(config.endpoint, "http://127.0.0.1:8080/v1/chat/completions");
   assert.equal(config.kind, "openai-compatible");
-  assert.equal(config.model, "local-model");
+  assert.equal(config.model, "my-local-instruct-model");
   assert.equal(config.apiKey, undefined);
 });
 
@@ -45,6 +46,8 @@ test("rejects malformed or credential-bearing endpoint URLs", () => {
   assert.throws(() => resolveChatProvider({ NEXUS_LLM_BASE_URL: "not-a-url" }), /absolute HTTP\(S\) URL/i);
   assert.throws(() => resolveChatProvider({ NEXUS_LLM_BASE_URL: "https://user:pass@example.test/v1" }), /must not contain credentials/i);
   assert.throws(() => resolveChatProvider({ NEXUS_LLM_BASE_URL: "ftp://example.test/v1" }), /HTTP or HTTPS/i);
+  assert.throws(() => resolveChatProvider({ NEXUS_LLM_BASE_URL: "http://model-server.example/v1", NEXUS_LLM_MODEL: "model" }), /HTTPS except for loopback/i);
+  assert.throws(() => resolveChatProvider({ NEXUS_LLM_BASE_URL: "https://model-server.example/v1" }), /NEXUS_LLM_MODEL is required/i);
 });
 
 test("parses standard and text-part chat completion responses", () => {
