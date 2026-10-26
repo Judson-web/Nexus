@@ -42,8 +42,8 @@ function textIssue(value: string, maxCharacters: number): string | null {
   const text = normalizeContent(value);
   if (text.length < 12) return "text-too-short";
   if (text.length > maxCharacters) return "text-too-long";
-  if (/(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})/iu.test(text)) return "email-like-content";
-  if (/(?:\\+?\\d[\\d ().-]{8,}\\d)/u.test(text)) return "phone-like-content";
+  if (/(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/iu.test(text)) return "email-like-content";
+  if (/(?:\+?\d[\d ().-]{8,}\d)/u.test(text)) return "phone-like-content";
   return null;
 }
 
