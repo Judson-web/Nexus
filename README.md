@@ -1,17 +1,19 @@
 # Nexus
 
-Nexus is a TypeScript-first research project for building and progressively training an original language model. The model runtime does not call third-party AI inference APIs.
+Nexus is a TypeScript-first research project for building and progressively training an original language model. It now separates the from-scratch model research track from a practical pretrained-model inference path so the public playground can return useful answers without pretending a tiny experimental checkpoint is already capable.
 
 ## Current milestone
 
-The repository includes two in-repository CPU language-model baselines: a byte-level bigram model and a context-window neural MLP with learned byte embeddings, a tanh hidden layer, and a softmax next-byte head. The web endpoint serves only a configured, checksum-verified Transformer checkpoint. If no checkpoint is configured, inference returns an explicit `503 MODEL_NOT_CONFIGURED` response rather than generating misleading output from the tiny bigram baseline.
+The in-repository CPU baselines and from-scratch Transformer remain research tools. The public `POST /api/generate` endpoint prefers a configured pretrained open-weight model through Hugging Face Inference Providers or a self-hosted OpenAI-compatible server (for example, llama.cpp, vLLM, or SGLang). If no provider is configured, it returns a clear `503 LLM_PROVIDER_NOT_CONFIGURED` message. The experimental from-scratch checkpoint is opt-in only and is never used silently as a substitute for a pretrained model.
 
-- Deterministic model initialization, UTF-8 byte tokenizer, and CPU training.
-- Versioned JSON checkpoints with checksum verification.
-- Responsive model playground at `/` and input-validated `POST /api/generate`.
-- No third-party AI inference APIs or provider keys.
+- Deterministic data preparation, license/provenance manifests, split-leakage checks, and CPU research training.
+- Versioned research checkpoints with SHA-256 verification and held-out evaluation metadata.
+- Pretrained inference through Hugging Face's OpenAI-compatible router or a configurable self-hosted OpenAI-compatible endpoint.
+- Bounded prompt/history validation, server-side secrets, upstream timeouts, explicit provider errors, and model/provider labels in the playground.
 - PostgreSQL schema for dataset metadata, training runs, model versions, and evaluation metadata.
 - Git-based Vercel builds are intentionally ignored; deployments must be explicitly initiated after verification.
+
+**Serving setup:** follow [docs/model-serving.md](docs/model-serving.md) to configure `HF_TOKEN` or a self-hosted endpoint. The Hugging Face path requires a user token with Inference Providers permission and may consume account credits or be subject to provider rate limits. No secret or provider account is provisioned automatically by this repository.
 
 ## Requirements and commands
 
