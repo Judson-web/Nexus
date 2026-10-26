@@ -6,16 +6,6 @@ on:
       - "training/**"
   workflow_dispatch:
     inputs:
-      documents:
-        description: "Number of eligible CC0 abstracts to acquire (3-1000)"
-        required: true
-        default: "200"
-        type: string
-      max_rows:
-        description: "Maximum dataset-viewer rows to scan (100-20000)"
-        required: true
-        default: "5000"
-        type: string
       epochs:
         description: "Training epochs per example (start small)"
         required: true
@@ -26,6 +16,10 @@ on:
         required: true
         default: "17"
         type: string
+
+concurrency:
+  group: nexus-corpus-training
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -42,14 +36,14 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run check
       - run: npm test
-      - name: Acquire bounded, provenance-checked CC0 corpus
-        run: npm run acquire:common-pile -- --documents "${{ inputs.documents || '200' }}" --max-rows "${{ inputs.max_rows || '5000' }}" --output artifacts/common-pile-arxiv-abstracts
-      - name: Build split-preserving training manifest
-        run: npm run prepare:dataset:source-splits -- --train artifacts/common-pile-arxiv-abstracts/train.txt --validation artifacts/common-pile-arxiv-abstracts/validation.txt --test artifacts/common-pile-arxiv-abstracts/test.txt --source-name "Common Pile arXiv abstracts" --source-url "https://huggingface.co/datasets/common-pile/arxiv_abstracts" --license "CC0 (record-level metadata checked; see acquisition manifest)" --attribution "Common Pile arXiv abstracts; source URLs and authors in acquisition manifest" --output artifacts/dataset-manifest.json
+      - name: Acquire pinned, license-verified OASST1 conversations
+        run: npm run acquire:oasst1 -- --max-trees 500 --output artifacts/oasst1
+      - name: Build conversation training manifest with isolated splits
+        run: npm run prepare:dataset:source-splits -- --train artifacts/oasst1/train.txt --validation artifacts/oasst1/validation.txt --test artifacts/oasst1/test.txt --source-name "OpenAssistant Conversations Dataset (OASST1)" --source-url "https://huggingface.co/datasets/OpenAssistant/oasst1/tree/fdf72ae0827c1cda404aff25b6603abec9e3399b" --license "Apache-2.0" --attribution "OpenAssistant contributors, OASST1, Apache-2.0; see LICENSE and acquisition manifest" --output artifacts/dataset-manifest.json
       - name: Audit tokenizer coverage and sequence lengths
         run: npx tsx src/cli/audit-tokenizer.ts --manifest artifacts/dataset-manifest.json > artifacts/tokenizer-audit.json
       - name: Run concurrent, validation-ranked model sweep
-        run: npm run train:sweep -- --manifest artifacts/dataset-manifest.json --output-dir artifacts/sweep --summary artifacts/sweep-summary.json --workers 2 --epochs "${{ inputs.epochs || '1' }}" --seed "${{ inputs.seed || '17' }}" --max-minutes 15 --max-tokens-per-example 192 --target-stride 2
+        run: npm run train:sweep -- --manifest artifacts/dataset-manifest.json --output-dir artifacts/sweep --summary artifacts/sweep-summary.json --workers 1 --epochs "${{ inputs.epochs || '1' }}" --seed "${{ inputs.seed || '17' }}" --max-minutes 15 --max-tokens-per-example 96 --target-stride 16
       - name: Verify all candidate checkpoints and select by validation only
         run: |
           node --input-type=module -e '
@@ -83,11 +77,11 @@ jobs:
           checkpoint=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; const r = JSON.parse(readFileSync("artifacts/experiment-results.json", "utf8")); const path = r.experiments[0]?.output; if (typeof path !== "string") throw new Error("No validation-ranked checkpoint"); process.stdout.write(path);')
           test -s "$checkpoint"
           mkdir -p artifacts/generation-samples
-          npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "The universe is" --tokens 120 > artifacts/generation-samples/universe.txt
-          npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "In this paper, we present" --tokens 120 > artifacts/generation-samples/research.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "User: Explain what a black hole is in simple terms. Assistant: " --tokens 120 > artifacts/generation-samples/universe.txt
+          npx tsx src/cli/transformer.ts generate --checkpoint "$checkpoint" --prompt "User: Write a short introduction to scientific research. Assistant: " --tokens 120 > artifacts/generation-samples/research.txt
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
-            const prompts = ["The universe is", "In this paper, we present"];
+            const prompts = ["User: Explain what a black hole is in simple terms. Assistant: ", "User: Write a short introduction to scientific research. Assistant: "];
             const files = ["artifacts/generation-samples/universe.txt", "artifacts/generation-samples/research.txt"];
             const samples = files.map((path, index) => {
               const text = readFileSync(path, "utf8");
@@ -106,16 +100,18 @@ jobs:
             writeFileSync("artifacts/generation-samples/summary.json", JSON.stringify({ selectedBy: "validation negative log-likelihood", qualityNote: "Generation sanity checks are diagnostic. A short or empty continuation is preserved and flagged so the run can upload metrics and samples; this is not evidence of useful generation.", qualityWarnings, samples }, null, 2) + "\n");
             console.log(JSON.stringify({ samples: samples.map(({ prompt, continuationCharacters, status, checks }) => ({ prompt, continuationCharacters, status, checks })), qualityWarnings }, null, 2));
           '
-      - uses: actions/upload-artifact@v4
+      - name: Upload training diagnostics and artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: nexus-expanded-corpus-transformer-${{ github.run_id }}
+          name: nexus-oasst1-transformer-${{ github.run_id }}
           path: |
-            artifacts/common-pile-arxiv-abstracts/
+            artifacts/oasst1/
             artifacts/dataset-manifest.json
             artifacts/sweep/
             artifacts/sweep-summary.json
             artifacts/tokenizer-audit.json
             artifacts/experiment-results.json
             artifacts/generation-samples/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14

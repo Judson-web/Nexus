@@ -35,6 +35,22 @@ test("Transformer reports bounded token-level training progress", () => {
   assert.ok(progress.every((entry) => entry.targetsProcessed > 0 && entry.targetsProcessed <= entry.totalTargets));
 });
 
+test("Transformer can restrict next-token loss to assistant-response targets", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 3, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 77 };
+  const tokens = [1, 2, 3, 4, 5, 6, 7, 1, 2];
+  const targetStartIndex = 4;
+  const model = new TransformerModel(tinyConfig);
+  const metrics = model.train(tokens, 0.001, 1, 1, "adam", undefined, 1, 0, "constant", targetStartIndex);
+  assert.equal(metrics.examples, tokens.length - targetStartIndex);
+  assert.ok(Number.isFinite(metrics.loss));
+});
+
+test("Transformer rejects an assistant target boundary outside the token sequence", () => {
+  const tinyConfig = { ...config, vocabSize: 8, contextSize: 3, embeddingSize: 4, headCount: 2, feedForwardSize: 4, seed: 78 };
+  const model = new TransformerModel(tinyConfig);
+  assert.throws(() => model.train([1, 2, 3], 0.001, 1, 1, "adam", undefined, 1, 0, "constant", 3), /targetStartIndex/i);
+});
+
 test("Transformer checkpoint round-trips and rejects malformed weights", () => {
   const model = new TransformerModel(config);
   const restored = TransformerModel.fromCheckpoint(model.toCheckpoint());

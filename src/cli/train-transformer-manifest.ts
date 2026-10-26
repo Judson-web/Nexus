@@ -3,8 +3,8 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { validateDatasetManifest } from "../evaluation/manifest.js";
 import { DEFAULT_TRANSFORMER_CONFIG, TransformerModel, type LearningRateSchedule, type TransformerOptimizer, type TransformerCheckpoint } from "../model/transformer-model.js";
-import { EOS_TOKEN_ID } from "../tokenizer/byte-tokenizer.js";
 import { BytePairTokenizer } from "../tokenizer/byte-pair-tokenizer.js";
+import { encodeTrainingExample } from "../training/supervised-example.js";
 
 function parseArgs(args: string[]): Map<string, string> {
   const options = new Map<string, string>();
@@ -48,8 +48,10 @@ function scoreSplit(
   let totalNegativeLogLikelihood = 0;
   let tokens = 0;
   for (const example of examples) {
-    const sequence = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
-    for (let i = 0; i < sequence.length; i += 1) {
+    // Instruction prompts are context, not targets the assistant should reproduce.
+    const encoded = encodeTrainingExample(example.text, tokenizer, contextSize);
+    const sequence = encoded.tokens;
+    for (let i = Math.max(1, encoded.lossStartIndex); i < sequence.length; i += 1) {
       const context = sequence.slice(Math.max(0, i - contextSize), i);
       const probabilities = model.probabilities(context);
       const probability = probabilities[sequence[i]!]!;
@@ -127,9 +129,10 @@ async function main(): Promise<void> {
     if (JSON.stringify(rawCheckpoint.config) !== JSON.stringify(modelConfig)) throw new Error("Resume checkpoint model configuration does not match the requested configuration.");
     const resumeState = JSON.parse(await readFile(resumePath, "utf8")) as {
       format: string; manifestSha256: string; completedExampleIds: string[]; modelConfig: typeof modelConfig;
-      epochs: number; learningRate: number; optimizer: TransformerOptimizer; schedule: LearningRateSchedule; weightDecay: number; targetStride: number; maxTokensPerExample: number; truncatedExamples?: number;
+      epochs: number; learningRate: number; optimizer: TransformerOptimizer; schedule: LearningRateSchedule; weightDecay: number; targetStride: number; maxTokensPerExample: number; truncatedExamples?: number; lossPolicy?: string;
     };
     if (resumeState.format !== "nexus-training-resume" || resumeState.manifestSha256 !== manifestSha256) throw new Error("Resume checkpoint manifest hash mismatch.");
+    if (resumeState.lossPolicy !== "assistant-only-for-user-assistant-pairs-v1") throw new Error("Resume checkpoint uses a different or legacy loss policy. Start a fresh run rather than mixing objectives.");
     if (JSON.stringify(resumeState.modelConfig) !== JSON.stringify(modelConfig) ||
         resumeState.epochs !== epochs || resumeState.learningRate !== learningRate ||
         resumeState.optimizer !== optimizer || resumeState.schedule !== schedule ||
@@ -164,23 +167,19 @@ async function main(): Promise<void> {
     exampleIndex += 1;
     if (completedExampleIds.has(example.id)) continue;
     if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit before example ${exampleIndex}/${trainingExamples.length}.`);
-    let tokens = [...tokenizer.encode(example.text, false), EOS_TOKEN_ID];
-    if (tokens.length > maxTokensPerExample) {
-      // Keep a deterministic prefix and restore EOS so each bounded training
-      // sequence has a valid terminal target rather than a random cut-off.
-      tokens = [...tokens.slice(0, maxTokensPerExample - 1), EOS_TOKEN_ID];
-      truncatedExamples += 1;
-    }
-    if (tokens.length < 2) continue;
+    const encoded = encodeTrainingExample(example.text, tokenizer, config.contextSize, maxTokensPerExample);
+    const { tokens, lossStartIndex } = encoded;
+    if (encoded.truncated) truncatedExamples += 1;
+    if (tokens.length < 2 || lossStartIndex >= tokens.length) continue;
     const scheduleProgress = (exampleIndex - 1) / Math.max(1, trainingExamples.length - 1);
     const scheduledLearningRate = schedule === "cosine"
       ? learningRate * (0.1 + 0.9 * 0.5 * (1 + Math.cos(Math.PI * scheduleProgress)))
       : learningRate;
-    console.error(`[train] example ${exampleIndex}/${trainingExamples.length}; targets=${tokens.length - 1}; lr=${scheduledLearningRate.toExponential(3)}; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
+    console.error(`[train] example ${exampleIndex}/${trainingExamples.length}; response_targets=${tokens.length - lossStartIndex}; lr=${scheduledLearningRate.toExponential(3)}; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
     const metrics = model.train(tokens, scheduledLearningRate, epochs, 1, optimizer, (progress) => {
       if (Date.now() >= deadline) throw new Error(`Training exceeded the ${maxMinutes}-minute runtime limit during example ${exampleIndex}/${trainingExamples.length}.`);
       console.error(`[train] example ${exampleIndex}/${trainingExamples.length} epoch ${progress.epoch}/${progress.epochs}: ${progress.targetsProcessed}/${progress.totalTargets} targets; elapsed=${Math.round((Date.now() - startedAt) / 1000)}s`);
-    }, targetStride, weightDecay, "constant");
+    }, targetStride, weightDecay, "constant", lossStartIndex);
     weightedLoss += metrics.loss * metrics.examples;
     trainedTokens += metrics.examples;
     lastGradientNorm = metrics.gradientNorm;
@@ -194,6 +193,7 @@ async function main(): Promise<void> {
     await writeAtomic(`${outputPath}.resume.json`, JSON.stringify({
       format: "nexus-training-resume", manifestSha256, completedExampleIds: [...completedExampleIds],
       modelConfig, epochs, learningRate, optimizer, schedule, weightDecay, targetStride, maxTokensPerExample,
+      lossPolicy: "assistant-only-for-user-assistant-pairs-v1",
     }, null, 2) + "\n");
   }
   if (trainedTokens === 0 && completedExampleIds.size === 0) throw new Error("Training examples contain no usable next-token targets.");
@@ -226,6 +226,7 @@ async function main(): Promise<void> {
     },
     training: {
       seed, epochsPerExample: epochs, learningRate, optimizer, schedule, weightDecay,
+      lossPolicy: "assistant-only-for-user-assistant-pairs-v1",
       tokenizer: { type: "train-only byte-pair", merges: tokenizer.toJSON().merges.length, vocabSize: tokenizer.vocabSize },
       trainedExamples: trainingExamples.length,
       maxTokensPerExample,
@@ -242,7 +243,7 @@ async function main(): Promise<void> {
   await writeAtomic(outputPath, checkpointContent);
   await writeAtomic(`${outputPath}.sha256`, `${checkpointSha256}  ${checkpointBytes.length}\n`);
   await writeAtomic(`${outputPath}.provenance.json`, JSON.stringify(provenance, null, 2) + "\n");
-  await writeAtomic(`${outputPath}.resume.json`, JSON.stringify({ format: "nexus-training-resume", manifestSha256, completedExampleIds: [...completedExampleIds], modelConfig, epochs, learningRate, optimizer, schedule, weightDecay, targetStride, maxTokensPerExample, truncatedExamples }, null, 2) + "\n");
+  await writeAtomic(`${outputPath}.resume.json`, JSON.stringify({ format: "nexus-training-resume", manifestSha256, completedExampleIds: [...completedExampleIds], modelConfig, epochs, learningRate, optimizer, schedule, weightDecay, targetStride, maxTokensPerExample, truncatedExamples, lossPolicy: "assistant-only-for-user-assistant-pairs-v1" }, null, 2) + "\n");
   console.log(JSON.stringify({ outputPath, checkpointSha256, provenancePath: `${outputPath}.provenance.json`, ...provenance.training, heldOutEvaluation }, null, 2));
 }
 

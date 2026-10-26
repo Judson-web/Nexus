@@ -360,7 +360,7 @@ export class TransformerModel {
    * single optimizer update. This reference implementation prioritizes correctness
    * and gradient inspectability over training throughput.
    */
-  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void, targetStride = 1, weightDecay = 0, schedule: LearningRateSchedule = "cosine"): TransformerMetrics {
+  public train(tokens: readonly number[], learningRate = 0.002, epochs = 1, maxGradientNorm = 1, optimizer: TransformerOptimizer = "sgd", onProgress?: (progress: { epoch: number; epochs: number; targetsProcessed: number; totalTargets: number }) => void, targetStride = 1, weightDecay = 0, schedule: LearningRateSchedule = "cosine", targetStartIndex = 1): TransformerMetrics {
     if (this.legacyArchitecture) throw new Error("Legacy single-block checkpoints are inference-only; start a fresh run to train the new architecture.");
     this.validateTokens(tokens);
     checkInteger(epochs, "epochs", 1, 1000);
@@ -376,8 +376,11 @@ export class TransformerModel {
     if (schedule !== "constant" && schedule !== "cosine") throw new RangeError("schedule must be constant or cosine.");
     if (optimizer !== "adamw" && weightDecay !== 0) throw new RangeError("weightDecay is supported only by adamw.");
     checkInteger(targetStride, "targetStride", 1, 32);
+    if (!Number.isSafeInteger(targetStartIndex) || targetStartIndex < 1 || targetStartIndex >= tokens.length) {
+      throw new RangeError("targetStartIndex must identify a target token after the initial context and before the end of the sequence.");
+    }
     const targetIndices: number[] = [];
-    for (let i = 1; i < tokens.length; i += targetStride) targetIndices.push(i);
+    for (let i = targetStartIndex; i < tokens.length; i += targetStride) targetIndices.push(i);
     if (targetIndices.at(-1) !== tokens.length - 1) targetIndices.push(tokens.length - 1);
     const exampleCount = targetIndices.length;
     let gradientNorm = 0;
