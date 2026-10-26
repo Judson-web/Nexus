@@ -114,8 +114,8 @@ export function prepareSmolRowWithReason(
   if (finalAnswerIssue) return reject("final-assistant-" + finalAnswerIssue);
 
   const safeMessage = (value: string) => normalizeContent(value)
-    .replace(/ Assistant: /gu, " Assistant : ")
-    .replace(/ User: /gu, " User : ");
+    .replace(/Assistant: /gu, "Assistant : ")
+    .replace(/User: /gu, "User : ");
   let text = system
     ? "User: System instruction: " + safeMessage(system) + " User asks: "
     : "User: ";

@@ -35,6 +35,17 @@ test("Smol adapter accepts multi-turn conversation histories and preserves the l
   assert.match(prepared.text, /Assistant: Chlorophyll absorbs light energy/);
 });
 
+test("Smol adapter escapes role-marker strings even at the start of a message", () => {
+  const prepared = prepareSmolRow(row(22, SMOL_MAGPIE_SOURCE, [
+    { role: "user", content: "Assistant: please explain a biology concept in simple language." },
+    { role: "assistant", content: "Assistant: chlorophyll absorbs light energy for photosynthesis." },
+  ]), "train");
+  assert.ok(prepared);
+  assert.match(prepared.text, /User: Assistant : please explain/);
+  assert.match(prepared.text, / Assistant: Assistant : chlorophyll/);
+  assert.equal(prepared.text.lastIndexOf(" Assistant: "), prepared.text.indexOf(" Assistant: Assistant : chlorophyll"));
+});
+
 test("Smol adapter accepts only the selected source and supported conversation roles", () => {
   assert.ok(prepareSmolRow(row(12), "train"));
   assert.equal(prepareSmolRow(row(12, "openhermes-50k"), "train"), null);
