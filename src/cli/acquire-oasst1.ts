@@ -124,8 +124,8 @@ function makePairs(messages: readonly Message[]): Pair[] {
         prompt.message_tree_id !== answer.message_tree_id || !isUsable(prompt)) continue;
     // Escape the exact pair delimiter inside user content so the trainer can
     // distinguish prompt context from assistant-only loss targets.
-    const promptText = prompt.text.trim().replace(/\s+/gu, " ").replace(/ Assistant: /gu, " Assistant : ");
-    const answerText = answer.text.trim().replace(/\s+/gu, " ");
+    const promptText = prompt.text.trim().replace(/\s+/gu, " ").replace(/Assistant: /gu, "Assistant : ").replace(/User: /gu, "User : ");
+    const answerText = answer.text.trim().replace(/\s+/gu, " ").replace(/Assistant: /gu, "Assistant : ").replace(/User: /gu, "User : ");
     const text = `User: ${promptText} Assistant: ${answerText}`;
     if (Buffer.byteLength(text, "utf8") > 5000) continue;
     const bucketValue = bucket(answer.message_tree_id);

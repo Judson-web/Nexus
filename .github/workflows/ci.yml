@@ -20,9 +20,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - run: npm install --no-audit --no-fund
       - run: npm run check
       - run: npm test
+      - name: Verify pretrained LoRA preparation and prompt-completion parsing
+        run: |
+          python -m py_compile scripts/train_pretrained_lora.py
+          python -m unittest discover -s tests -p "test_train_pretrained_lora.py"
       - run: npm run train -- --epochs 2 --output /tmp/nexus-smoke.json
       - run: npm run generate -- --checkpoint /tmp/nexus-smoke.json --prompt "Nexus" --tokens 12
       - run: npm run train:context -- --epochs 2 --output /tmp/nexus-context-smoke.json

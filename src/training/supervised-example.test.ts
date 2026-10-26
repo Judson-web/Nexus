@@ -35,6 +35,13 @@ test("long instruction prompts keep only the suffix available to the model's con
   assert.deepEqual(encoded.tokens.slice(0, 8), tokenizer.encode(prefix, false).slice(-8));
 });
 
+test("a token cap smaller than the context window still reserves one response target", () => {
+  const encoded = encodeTrainingExample("User: Explain the meaning of gravity. Assistant: Gravity attracts objects with mass.", tokenizer, 32, 16);
+  assert.equal(encoded.tokens.length, 16);
+  assert.equal(encoded.lossStartIndex, 15);
+  assert.equal(encoded.truncated, true);
+});
+
 test("overlong responses are truncated without adding a false end-of-turn token", () => {
   const text = "User: Say many words. Assistant: " + "long answer ".repeat(80);
   const encoded = encodeTrainingExample(text, tokenizer, 8, 24);
@@ -42,6 +49,17 @@ test("overlong responses are truncated without adding a false end-of-turn token"
   assert.equal(encoded.lossStartIndex, 8);
   assert.equal(encoded.truncated, true);
   assert.notEqual(encoded.tokens.at(-1), EOS_TOKEN_ID);
+});
+
+test("multi-turn SFT scores only the final assistant reply", () => {
+  const text = "User: Describe photosynthesis. Assistant: Plants use sunlight to produce sugars. User: What does chlorophyll do? Assistant: Chlorophyll absorbs light energy.";
+  const marker = text.lastIndexOf(" Assistant: ");
+  const prefix = text.slice(0, marker + " Assistant: ".length);
+  const response = text.slice(marker + " Assistant: ".length);
+  const encoded = encodeTrainingExample(text, tokenizer, 32);
+  assert.deepEqual(encoded.tokens.slice(0, encoded.lossStartIndex), tokenizer.encode(prefix, false).slice(-32));
+  assert.deepEqual(encoded.tokens.slice(encoded.lossStartIndex, -1), tokenizer.encode(response, false));
+  assert.equal(encoded.lossPolicy, "assistant-only-for-user-assistant-pairs-v1");
 });
 
 test("plain-text examples retain the full-sequence objective", () => {
@@ -53,5 +71,5 @@ test("plain-text examples retain the full-sequence objective", () => {
 
 test("encoding rejects invalid context and truncation settings", () => {
   assert.throws(() => encodeTrainingExample("text", tokenizer, 0), /contextSize/i);
-  assert.throws(() => encodeTrainingExample("text", tokenizer, 8, 8), /maxTokens/i);
+  assert.throws(() => encodeTrainingExample("text", tokenizer, 8, 1), /maxTokens/i);
 });

@@ -39,6 +39,7 @@ test("loads a Transformer checkpoint only when its checksum and byte count match
     assert.equal(loaded.bytes, Buffer.byteLength(JSON.stringify(checkpoint) + "\n", "utf8"));
     assert.deepEqual(loaded.model.probabilities([78, 101]), tinyModelFrom(checkpoint).probabilities([78, 101]));
     assert.equal(loaded.tokenizer.constructor.name, "ByteTokenizer");
+    assert.equal(loaded.trainingFormat, "nexus-causal-lm-v1");
 
     await writeFile(path, Buffer.concat([Buffer.from(JSON.stringify(checkpoint) + "\n"), Buffer.from("tampered")]));
     await assert.rejects(loadVerifiedTransformerArtifact(path), /size does not match|checksum verification failed/i);
@@ -50,6 +51,19 @@ test("loads a Transformer checkpoint only when its checksum and byte count match
 function tinyModelFrom(checkpoint: ReturnType<TransformerModel["toCheckpoint"]>): TransformerModel {
   return TransformerModel.fromCheckpoint(checkpoint);
 }
+
+test("preserves assistant SFT format metadata in a verified checkpoint", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nexus-chat-sft-artifact-"));
+  const path = join(directory, "model.json");
+  try {
+    const checkpoint = { ...tinyModel().toCheckpoint(), trainingFormat: "nexus-chat-sft-v1" as const };
+    await writeArtifact(path, checkpoint);
+    const loaded = await loadVerifiedTransformerArtifact(path);
+    assert.equal(loaded.trainingFormat, "nexus-chat-sft-v1");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("loads the embedded BPE tokenizer and rejects a vocabulary mismatch", async () => {
   const directory = await mkdtemp(join(tmpdir(), "nexus-bpe-artifact-"));

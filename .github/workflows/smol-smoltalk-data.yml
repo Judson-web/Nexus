@@ -1,0 +1,119 @@
+name: Nexus Smol-SmolTalk data acquisition
+
+on:
+  push:
+    branches:
+      - "feat/**"
+    paths:
+      - "src/cli/acquire-smol-smoltalk.ts"
+      - "src/data/smol-smoltalk.ts"
+      - "src/data/smol-smoltalk.test.ts"
+      - "package.json"
+      - ".github/workflows/smol-smoltalk-data.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire-and-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - name: Acquire a bounded, source-filtered Smol-SmolTalk sample
+        run: npm run acquire:smol-smoltalk -- --max-train-rows 1500 --max-test-rows 500 --output artifacts/smol-smoltalk
+      - name: Validate explicit train, validation and test splits
+        run: |
+          npm run prepare:dataset:source-splits -- \
+            --train artifacts/smol-smoltalk/train.txt \
+            --validation artifacts/smol-smoltalk/validation.txt \
+            --test artifacts/smol-smoltalk/test.txt \
+            --source-name "HuggingFaceTB/smol-smoltalk:smol-magpie-ultra-short" \
+            --source-url "https://huggingface.co/datasets/HuggingFaceTB/smol-smoltalk" \
+            --license "Apache-2.0" \
+            --attribution "Hugging Face Smol Models Research, Smol-SmolTalk / Smol-Magpie-Ultra; arXiv:2502.02737" \
+            --output artifacts/smol-smoltalk-manifest.json
+      - name: Create a deterministic capped SFT experiment split
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/smol-smoltalk-experiment/input
+          test "$(wc -l < artifacts/smol-smoltalk/train.txt)" -ge 500
+          test "$(wc -l < artifacts/smol-smoltalk/validation.txt)" -ge 20
+          test "$(wc -l < artifacts/smol-smoltalk/test.txt)" -ge 32
+          head -n 500 artifacts/smol-smoltalk/train.txt > artifacts/smol-smoltalk-experiment/input/train.txt
+          head -n 20 artifacts/smol-smoltalk/validation.txt > artifacts/smol-smoltalk-experiment/input/validation.txt
+          head -n 32 artifacts/smol-smoltalk/test.txt > artifacts/smol-smoltalk-experiment/input/test.txt
+          npm run prepare:dataset:source-splits -- \
+            --train artifacts/smol-smoltalk-experiment/input/train.txt \
+            --validation artifacts/smol-smoltalk-experiment/input/validation.txt \
+            --test artifacts/smol-smoltalk-experiment/input/test.txt \
+            --source-name "HuggingFaceTB/smol-smoltalk:smol-magpie-ultra-short:bounded-experiment" \
+            --source-url "https://huggingface.co/datasets/HuggingFaceTB/smol-smoltalk" \
+            --license "Apache-2.0" \
+            --attribution "Hugging Face Smol Models Research, Smol-SmolTalk / Smol-Magpie-Ultra; arXiv:2502.02737" \
+            --output artifacts/smol-smoltalk-experiment/manifest.json
+      - name: Train bounded from-scratch SFT research model
+        run: |
+          npm run train:transformer:manifest -- \
+            --manifest artifacts/smol-smoltalk-experiment/manifest.json \
+            --output artifacts/smol-smoltalk-experiment/transformer.json \
+            --epochs 1 --seed 44 --learning-rate 0.001 --schedule constant \
+            --context-size 16 --embedding-size 4 --heads 2 --feed-forward-size 8 --layer-count 1 \
+            --max-minutes 10 --max-tokens-per-example 96 --target-stride 4
+      - name: Generate assistant-format samples from the SFT experiment
+        run: |
+          set -euo pipefail
+          npx tsx src/cli/transformer.ts generate \
+            --checkpoint artifacts/smol-smoltalk-experiment/transformer.json \
+            --prompt "Explain photosynthesis in simple terms." --tokens 80 \
+            > artifacts/smol-smoltalk-experiment/sample-photosynthesis.txt
+          npx tsx src/cli/transformer.ts generate \
+            --checkpoint artifacts/smol-smoltalk-experiment/transformer.json \
+            --prompt "Give two tips for studying biology." --tokens 80 \
+            > artifacts/smol-smoltalk-experiment/sample-study-tips.txt
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const samples = [
+              { prompt: "Explain photosynthesis in simple terms.", path: "artifacts/smol-smoltalk-experiment/sample-photosynthesis.txt" },
+              { prompt: "Give two tips for studying biology.", path: "artifacts/smol-smoltalk-experiment/sample-study-tips.txt" }
+            ].map(({ prompt, path }) => {
+              const text = readFileSync(path, "utf8").trim();
+              const continuation = text;
+              return {
+                prompt,
+                continuationCharacters: continuation.length,
+                continuationPresent: continuation.length > 0,
+                sample: continuation
+              };
+            });
+            const summary = {
+              note: "Tiny from-scratch CPU SFT experiment only. Inspect actual samples; automatic checks do not establish useful conversational ability.",
+              model: "Nexus Transformer, from-scratch",
+              trainingExamples: 500,
+              validationExamples: 20,
+              testExamples: 32,
+              sampleChecksPassed: samples.every(sample => sample.continuationPresent),
+              samples
+            };
+            writeFileSync("artifacts/smol-smoltalk-experiment/generation-summary.json", JSON.stringify(summary, null, 2) + "\n");
+            if (!summary.sampleChecksPassed) process.exit(1);
+            console.log(JSON.stringify({ sampleChecksPassed: summary.sampleChecksPassed, continuations: samples.map(({prompt, continuationCharacters})=>({prompt,continuationCharacters})) }, null, 2));
+          '
+      - name: Upload dataset manifest and license-preserving sample
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-smol-smoltalk-source-sample-${{ github.run_id }}
+          path: |
+            artifacts/smol-smoltalk/
+            artifacts/smol-smoltalk-manifest.json
+            artifacts/smol-smoltalk-experiment/
+          if-no-files-found: warn
+          retention-days: 14
